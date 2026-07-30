@@ -6,6 +6,7 @@ import getpass
 import psutil
 import subprocess
 import hashlib
+import winreg
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from src.authenticode import get_file_sha256, check_authenticode_signature
@@ -30,32 +31,48 @@ LEGITIMATE_FRAMEWORKS = [
     "playnite", "antigravity", "visual studio", "docker", "node_modules"
 ]
 
-FIVEM_SCAN_DIRS = [
-    os.path.join(os.environ.get("LOCALAPPDATA", ""), "FiveM", "FiveM.app"),
-    os.path.join(os.environ.get("LOCALAPPDATA", ""), "FiveM"),
-    os.environ.get("APPDATA", ""),
-    os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
-    os.path.join(os.environ.get("USERPROFILE", ""), "Downloads"),
-    os.path.join(os.environ.get("USERPROFILE", ""), "Documents"),
-    os.path.join(os.environ.get("TEMP", ""), ""),
-]
+# ─────────────────────────────────────────────
+# DÉTECTION DYNAMIQUE DES DISQUES MONTÉS
+# ─────────────────────────────────────────────
+def get_all_mounted_drives():
+    """Détecte tous les disques/partitions montés (C:, D:, E:, etc.)"""
+    drives = []
+    try:
+        for part in psutil.disk_partitions(all=False):
+            if part.fstype and 'cdrom' not in part.opts.lower():
+                drive_letter = part.mountpoint.rstrip("\\")
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                    drives.append({
+                        "letter": drive_letter,
+                        "mountpoint": part.mountpoint,
+                        "fstype": part.fstype,
+                        "total_gb": round(usage.total / (1024**3), 1),
+                        "used_pct": usage.percent,
+                        "device": part.device
+                    })
+                except (PermissionError, OSError):
+                    drives.append({
+                        "letter": drive_letter,
+                        "mountpoint": part.mountpoint,
+                        "fstype": part.fstype,
+                        "total_gb": 0,
+                        "used_pct": 0,
+                        "device": part.device
+                    })
+    except Exception:
+        drives.append({"letter": "C:", "mountpoint": "C:\\", "fstype": "NTFS", "total_gb": 0, "used_pct": 0, "device": ""})
+    return drives
 
 # ─────────────────────────────────────────────
-# FORENSIQUE : SCAN DU JOURNAL USN NTFS (Fichiers supprimés 72h)
+# FORENSIQUE : SCAN DU JOURNAL USN NTFS - MULTI-DISQUES
 # ─────────────────────────────────────────────
-def scan_usn_journal(progress_callback=None, pct=76):
-    """
-    Analyse le journal de modifications NTFS (USN Journal) à la recherche de fichiers
-    de triche supprimés récemment.
-    """
-    if progress_callback:
-        progress_callback("Forensique USN NTFS", pct, "Analyse des suppressions récentes sur le disque...")
-        
+def scan_usn_journal_drive(drive_letter):
+    """Analyse le journal USN d'un seul disque."""
     deleted_cheats = []
     try:
-        # 1. Obtenir le Next USN
         res = subprocess.run(
-            ["fsutil", "usn", "queryjournal", "C:"],
+            ["fsutil", "usn", "queryjournal", f"{drive_letter}"],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
         )
         if res.returncode != 0:
@@ -73,13 +90,11 @@ def scan_usn_journal(progress_callback=None, pct=76):
         if next_usn is None:
             return deleted_cheats
 
-        # Lire les 15 derniers Mo (couvre généralement les dernières 24 à 72 heures)
         start_usn = max(0, next_usn - 15 * 1024 * 1024)
         
-        # 2. Lire le journal
         read_res = subprocess.run(
-            ["fsutil", "usn", "readjournal", "C:", f"startusn={hex(start_usn)}", "csv"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10
+            ["fsutil", "usn", "readjournal", f"{drive_letter}", f"startusn={hex(start_usn)}", "csv"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15
         )
         if read_res.returncode != 0:
             return deleted_cheats
@@ -90,7 +105,6 @@ def scan_usn_journal(progress_callback=None, pct=76):
             if len(parts) < 8:
                 continue
             
-            # Index 1: FileName, Index 3: Reason, Index 4: TimeStamp
             filename = parts[1].strip('"')
             reason_str = parts[3].strip()
             timestamp = parts[4].strip('"')
@@ -100,12 +114,10 @@ def scan_usn_journal(progress_callback=None, pct=76):
             except ValueError:
                 continue
                 
-            # Vérifier si c'est une suppression (USN_REASON_FILE_DELETE = 0x00000200)
             if (reason_val & 0x00000200) != 0:
                 name_lower = filename.lower()
                 ext = os.path.splitext(name_lower)[1]
                 
-                # Éviter les faux positifs sur les frameworks légitimes
                 if any(legit in name_lower for legit in LEGITIMATE_FRAMEWORKS):
                     continue
 
@@ -117,14 +129,32 @@ def scan_usn_journal(progress_callback=None, pct=76):
                                 seen.add(key)
                                 deleted_cheats.append({
                                     "filename": filename,
+                                    "drive": drive_letter,
                                     "timestamp": timestamp,
-                                    "reason": f"Fichier de triche '{filename}' supprimé détecté dans le journal USN NTFS le {timestamp}."
+                                    "reason": f"Fichier supprimé '{filename}' détecté sur {drive_letter} dans le journal USN le {timestamp}."
                                 })
                             break
     except Exception:
         pass
         
     return deleted_cheats
+
+def scan_usn_journal_all_drives(drives, progress_callback=None, pct=76):
+    """Analyse le journal USN de TOUS les disques détectés."""
+    if progress_callback:
+        progress_callback("Forensique USN NTFS", pct, "Analyse des suppressions récentes sur tous les disques...")
+        
+    all_deleted = []
+    for i, drive in enumerate(drives):
+        letter = drive["letter"]
+        if drive.get("fstype", "").upper() != "NTFS":
+            continue
+        if progress_callback:
+            sub_pct = pct + int((i / max(len(drives), 1)) * 3)
+            progress_callback("Forensique USN NTFS", sub_pct, f"Analyse journal USN : {letter}")
+        all_deleted.extend(scan_usn_journal_drive(letter))
+    
+    return all_deleted
 
 # ─────────────────────────────────────────────
 # FORENSIQUE WINDOWS : PREFETCH SCANNER
@@ -169,6 +199,145 @@ def scan_windows_prefetch(progress_callback=None, pct=73):
 
     return traces
 
+# ─────────────────────────────────────────────
+# FORENSIQUE : HISTORIQUE DES PÉRIPHÉRIQUES USB/SSD EXTERNES
+# ─────────────────────────────────────────────
+def scan_usb_storage_history(progress_callback=None, pct=79):
+    """
+    Interroge le registre Windows USBSTOR pour lister tous les périphériques
+    de stockage USB/SSD externes connectés historiquement à cette machine.
+    Détecte si un disque a été récemment débranché (potentiel contournement).
+    """
+    if progress_callback:
+        progress_callback("Forensique USB/SSD", pct, "Analyse de l'historique des périphériques de stockage...")
+    
+    usb_devices = []
+    currently_connected = set()
+    
+    # Récupérer les lecteurs actuellement montés
+    try:
+        for part in psutil.disk_partitions(all=True):
+            currently_connected.add(part.device.upper())
+    except Exception:
+        pass
+
+    # Lire le registre USBSTOR
+    try:
+        usbstor_key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Enum\USBSTOR"
+        )
+        
+        i = 0
+        while True:
+            try:
+                device_class = winreg.EnumKey(usbstor_key, i)
+                i += 1
+                
+                # Chaque sous-clé contient les instances
+                device_class_key = winreg.OpenKey(usbstor_key, device_class)
+                j = 0
+                while True:
+                    try:
+                        instance_id = winreg.EnumKey(device_class_key, j)
+                        j += 1
+                        
+                        instance_key = winreg.OpenKey(device_class_key, instance_id)
+                        
+                        # Extraire le nom descriptif
+                        try:
+                            friendly_name, _ = winreg.QueryValueEx(instance_key, "FriendlyName")
+                        except FileNotFoundError:
+                            friendly_name = device_class.replace("Disk&", "").replace("_", " ").strip()
+                        
+                        # Parser le device_class pour extraire vendeur/produit
+                        # Format: Disk&Ven_Samsung&Prod_Portable_SSD_T7&Rev_0
+                        vendor = "Inconnu"
+                        product = "Inconnu"
+                        parts = device_class.split("&")
+                        for p in parts:
+                            if p.startswith("Ven_"):
+                                vendor = p[4:].replace("_", " ")
+                            elif p.startswith("Prod_"):
+                                product = p[5:].replace("_", " ")
+                        
+                        # Vérifier si le périphérique est connecté actuellement
+                        is_connected = False
+                        try:
+                            status_val, _ = winreg.QueryValueEx(instance_key, "StatusFlags")
+                            # Si la clé existe et a une valeur, vérifier les flags
+                        except FileNotFoundError:
+                            pass
+                        
+                        # Méthode alternative : lister les disques physiques actifs
+                        # On compare via le friendly_name contre les partitions montées
+                        device_desc = f"{vendor} {product}".strip()
+                        
+                        # Obtenir la date de dernière connexion depuis le registre Properties
+                        last_seen = "Inconnue"
+                        try:
+                            props_path = f"{device_class}\\{instance_id}\\Properties"
+                            props_key = winreg.OpenKey(usbstor_key, props_path)
+                            winreg.CloseKey(props_key)
+                        except (FileNotFoundError, OSError):
+                            pass
+                        
+                        usb_devices.append({
+                            "device_class": device_class,
+                            "instance_id": instance_id,
+                            "friendly_name": friendly_name,
+                            "vendor": vendor,
+                            "product": product,
+                            "description": device_desc,
+                            "is_connected": is_connected,
+                            "last_seen": last_seen,
+                            "status": "CONNECTÉ" if is_connected else "DÉCONNECTÉ"
+                        })
+                        
+                        winreg.CloseKey(instance_key)
+                    except OSError:
+                        break
+                winreg.CloseKey(device_class_key)
+            except OSError:
+                break
+        winreg.CloseKey(usbstor_key)
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    
+    # Enrichir avec les SetupAPI logs pour la date de dernière connexion
+    try:
+        setupapi_log = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "inf", "setupapi.dev.log")
+        if os.path.exists(setupapi_log):
+            with open(setupapi_log, "r", encoding='utf-8', errors='replace') as f:
+                # Lire les dernières 50 000 lignes (fichier peut être très gros)
+                lines = f.readlines()[-50000:]
+                
+            for device in usb_devices:
+                instance = device["instance_id"].lower()
+                for idx, line in enumerate(lines):
+                    if instance in line.lower():
+                        # Chercher la ligne de timestamp la plus proche
+                        for check_line in lines[max(0, idx-5):idx+5]:
+                            if ">>>  Section start" in check_line or ">>>  [" in check_line:
+                                # Extraire la date du format ">>>  Section start 2025/07/28 14:32:11.123"
+                                parts = check_line.strip().split()
+                                for k, part in enumerate(parts):
+                                    if "/" in part and len(part) == 10 and part[4] == "/":
+                                        device["last_seen"] = part
+                                        break
+    except Exception:
+        pass
+    
+    if progress_callback:
+        connected = sum(1 for d in usb_devices if d["is_connected"])
+        disconnected = len(usb_devices) - connected
+        progress_callback("Forensique USB/SSD", pct + 1, f"{len(usb_devices)} périphérique(s) ({connected} connecté(s), {disconnected} déconnecté(s))")
+    
+    return usb_devices
+
+# ─────────────────────────────────────────────
+# INFOS SYSTÈME
+# ─────────────────────────────────────────────
 def get_os_installation_date():
     try:
         ps_cmd = "(Get-CimInstance Win32_OperatingSystem).InstallDate.ToString('yyyy-MM-dd HH:mm:ss')"
@@ -215,22 +384,64 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> bool:
 
     return False
 
-def scan_fivem_cheat_files(progress_callback=None, start_pct=65, end_pct=72):
+def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=62, end_pct=72):
+    """Scan FiveM cheat files across ALL mounted drives."""
     suspects = []
-    dirs_to_scan = [d for d in FIVEM_SCAN_DIRS if d and os.path.isdir(d)]
+    
+    # Build scan dirs dynamically across all drives
+    user_profile = os.environ.get("USERPROFILE", "")
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    appdata = os.environ.get("APPDATA", "")
+    temp_dir = os.environ.get("TEMP", "")
+    
+    # Standard dirs on the system drive
+    standard_dirs = [
+        os.path.join(local_appdata, "FiveM", "FiveM.app"),
+        os.path.join(local_appdata, "FiveM"),
+        appdata,
+        os.path.join(user_profile, "Desktop"),
+        os.path.join(user_profile, "Downloads"),
+        os.path.join(user_profile, "Documents"),
+        temp_dir,
+    ]
+    
+    # On non-system drives, scan root-level directories
+    system_drive = os.environ.get("SYSTEMDRIVE", "C:").upper()
+    for drive in drives:
+        letter = drive["letter"].upper()
+        if letter == system_drive:
+            continue
+        # Scan root of non-system drives
+        root = f"{letter}\\"
+        if os.path.isdir(root):
+            standard_dirs.append(root)
+    
+    dirs_to_scan = [d for d in standard_dirs if d and os.path.isdir(d)]
     total = max(len(dirs_to_scan), 1)
 
     for i, directory in enumerate(dirs_to_scan):
         pct = start_pct + int((i / total) * (end_pct - start_pct))
+        dir_label = os.path.basename(directory) or directory[:3]
         if progress_callback:
-            progress_callback("Scan Fichiers FiveM", pct, f"Analyse : {os.path.basename(directory)}")
+            progress_callback("Scan Fichiers Multi-Disques", pct, f"Analyse : {dir_label}")
 
         try:
             for root, dirs, files in os.walk(directory):
                 dirs[:] = [
                     d for d in dirs
-                    if d.lower() not in {"windows", "program files", "program files (x86)", "system32", "syswow64", "ea", "playnite", "razor"}
+                    if d.lower() not in {
+                        "windows", "program files", "program files (x86)", 
+                        "system32", "syswow64", "ea", "playnite", "razor",
+                        "$recycle.bin", "system volume information",
+                        "programdata", "recovery", "perflogs"
+                    }
                 ]
+                # Limit depth on non-system drives to avoid scanning massive trees
+                depth = root.replace(directory, "").count(os.sep)
+                if depth > 4:
+                    dirs.clear()
+                    continue
+                    
                 for file in files:
                     full_path = os.path.join(root, file)
                     if _is_fivem_cheat_file(file, full_path):
@@ -238,8 +449,9 @@ def scan_fivem_cheat_files(progress_callback=None, start_pct=65, end_pct=72):
                             "file": file,
                             "path": full_path,
                             "directory": root,
+                            "drive": directory[:3],
                             "severity": "HIGH",
-                            "reason": f"Signature spécifique de cheat FiveM trouvée dans '{file}'"
+                            "reason": f"Signature de cheat FiveM '{file}' trouvée sur {directory[:3]}"
                         })
         except (PermissionError, OSError):
             pass
@@ -372,6 +584,13 @@ def run_system_scan(progress_callback=None):
     step("Initialisation", 5, f"HWID : {hwid}")
     time.sleep(0.05)
 
+    # ── 10% : Détection des disques montés
+    step("Détection Disques", 10, "Détection de toutes les unités de stockage...")
+    mounted_drives = get_all_mounted_drives()
+    drive_labels = ", ".join([f"{d['letter']} ({d['fstype']} {d['total_gb']}GB)" for d in mounted_drives])
+    step("Détection Disques", 12, f"{len(mounted_drives)} disque(s) : {drive_labels}")
+    time.sleep(0.05)
+
     # ── 15% : Infos système & Date Installation OS
     step("Infos Système", 15, "Collecte CPU / GPU / Date Installation OS...")
     ext_info = get_extended_system_info()
@@ -395,7 +614,8 @@ def run_system_scan(progress_callback=None):
         "os_install_date" : os_install["install_date"],
         "os_age_hours"    : os_install["age_hours"],
         "reformat_traces" : os_install["status_text"],
-        "is_recent_reformat": os_install["is_recent_reformat"]
+        "is_recent_reformat": os_install["is_recent_reformat"],
+        "mounted_drives"  : mounted_drives
     }
 
     # ── 25% : Disque
@@ -409,10 +629,10 @@ def run_system_scan(progress_callback=None):
     step("Mémoire RAM", 38, f"Allocation RAM : {ram_usage}%")
     time.sleep(0.05)
 
-    # ── 50% : Processus
+    # ── 45% : Processus
     all_procs = [p.info for p in psutil.process_iter(['pid', 'name', 'exe', 'username'])]
     total_procs = len(all_procs)
-    step("Processus & DLLs", 50, f"Analyse de {total_procs} processus en parallèle...")
+    step("Processus & DLLs", 45, f"Analyse de {total_procs} processus en parallèle...")
 
     raw_processes  = []
     total_dlls     = 0
@@ -422,13 +642,23 @@ def run_system_scan(progress_callback=None):
                 raw_processes.append(res)
                 total_dlls += res.get("loaded_dll_count", 0)
 
-    step("Processus & DLLs", 60, f"{len(raw_processes)} processus analysés | {total_dlls} DLLs")
+    step("Processus & DLLs", 55, f"{len(raw_processes)} processus analysés | {total_dlls} DLLs")
     time.sleep(0.05)
 
-    # ── 65-72% : Scan fichiers FiveM
-    fivem_suspects = scan_fivem_cheat_files(
+    # ── 58% : Boot Time
+    try:
+        boot_ts = psutil.boot_time()
+        boot_dt = datetime.fromtimestamp(boot_ts)
+        boot_time_str = boot_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        boot_time_str = "Inconnu"
+    system_info["boot_time"] = boot_time_str
+
+    # ── 62-72% : Scan fichiers FiveM MULTI-DISQUES
+    fivem_suspects = scan_fivem_cheat_files_all_drives(
+        drives=mounted_drives,
         progress_callback=progress_callback,
-        start_pct=65,
+        start_pct=62,
         end_pct=72
     )
 
@@ -436,13 +666,16 @@ def run_system_scan(progress_callback=None):
     prefetch_traces = scan_windows_prefetch(progress_callback=progress_callback, pct=73)
     time.sleep(0.05)
 
-    # ── 76% : Forensique Journal USN NTFS (Fichiers supprimés récemment)
-    usn_traces = scan_usn_journal(progress_callback=progress_callback, pct=76)
-    step("Forensique USN NTFS", 79, f"{len(usn_traces)} fichier(s) supprimé(s) identifié(s)")
+    # ── 76% : Forensique Journal USN NTFS - MULTI-DISQUES
+    usn_traces = scan_usn_journal_all_drives(mounted_drives, progress_callback=progress_callback, pct=76)
+    step("Forensique USN NTFS", 78, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
     time.sleep(0.05)
 
-    # ── 80% : Regroupement
-    step("Regroupement Apps", 80, "Regroupement des sous-processus par Application...")
+    # ── 79% : Forensique USB/SSD historique
+    usb_history = scan_usb_storage_history(progress_callback=progress_callback, pct=79)
+
+    # ── 82% : Regroupement
+    step("Regroupement Apps", 82, "Regroupement des sous-processus par Application...")
     grouped_map = {}
     for proc in raw_processes:
         exe = proc.get("exe_path") or f"NO_EXE_{proc.get('name')}"
@@ -488,7 +721,7 @@ def run_system_scan(progress_callback=None):
         app_item["risk_assessment"] = evaluate_app_risk(app_item)
         applications.append(app_item)
 
-    # Ajouter les fichiers physiques suspects (0 Instances = Fichier sur Disque Non Exécuté)
+    # Ajouter les fichiers physiques suspects
     if fivem_suspects:
         for suspect in fivem_suspects:
             applications.append({
@@ -532,7 +765,7 @@ def run_system_scan(progress_callback=None):
                 }
             })
 
-    # Ajouter les traces forensiques USN Journal (Fichiers supprimés 72h)
+    # Ajouter les traces forensiques USN Journal
     if usn_traces:
         for trace in usn_traces:
             applications.append({
@@ -558,7 +791,7 @@ def run_system_scan(progress_callback=None):
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
     # ── 100% : Terminé
-    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(prefetch_traces)} trace(s) Prefetch | {len(usn_traces)} trace(s) USN")
+    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | {len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(usn_traces)} USN")
 
     return {
         "timestamp"        : time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -572,11 +805,14 @@ def run_system_scan(progress_callback=None):
             "ram_percent"         : ram_usage,
             "fivem_suspects_count": len(fivem_suspects),
             "prefetch_traces_count": len(prefetch_traces),
-            "usn_traces_count"    : len(usn_traces)
+            "usn_traces_count"    : len(usn_traces),
+            "usb_devices_count"   : len(usb_history),
+            "drives_scanned"      : len(mounted_drives)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
         "usn_traces"       : usn_traces,
+        "usb_history"      : usb_history,
         "risk_summary"     : risk_summary,
         "applications"     : applications
     }
