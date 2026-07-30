@@ -12,16 +12,23 @@ from src.authenticode import get_file_sha256, check_authenticode_signature
 from src.scorer import evaluate_app_risk, calculate_overall_risk_grouped
 
 # ─────────────────────────────────────────────
-# FIVEM CHEAT SIGNATURES & EXTENSIONS
+# SIGNATURES DE CHEATS FIVEM SPÉCIFIQUES
 # ─────────────────────────────────────────────
-KNOWN_CHEATS = [
-    "eulen", "redengine", "hx", "skript", "lynx", "ham", "mafia",
-    "desync", "brutal", "dopamine", "watermark", "executor",
-    "dumper", "bypass", "tz_menu", "fallout", "absolute", "unmatched",
-    "inject", "cheat", "hack", "trainer", "mod_menu", "lua_inject",
-    "spoofer", "hwid_spoof", "kiddions", "stand_", "cherax"
+SPECIFIC_CHEATS = [
+    "eulen", "redengine", "hx_menu", "skript_executor", "lynx_menu", 
+    "ham_executor", "mafia_menu", "desync_menu", "brutal_cheat", 
+    "dopamine_executor", "tz_menu", "fallout_menu", "unmatched_cheat",
+    "kiddions", "stand_menu", "cherax", "subversion_menu", "dopamine.lua",
+    "eulen.exe", "redengine.exe", "lynx.asi", "hx.asi"
 ]
-CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1", ".bin"}
+
+CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1"}
+
+LEGITIMATE_FRAMEWORKS = [
+    "microsoft.extensions.", "system.reactive.", "newtonsoft.json",
+    "eaanticheat", "easyanticheat", "battleye", "vanguard", "ricochet",
+    "playnite", "antigravity", "visual studio", "docker", "node_modules"
+]
 
 FIVEM_SCAN_DIRS = [
     os.path.join(os.environ.get("LOCALAPPDATA", ""), "FiveM", "FiveM.app"),
@@ -34,13 +41,95 @@ FIVEM_SCAN_DIRS = [
 ]
 
 # ─────────────────────────────────────────────
+# FORENSIQUE : SCAN DU JOURNAL USN NTFS (Fichiers supprimés 72h)
+# ─────────────────────────────────────────────
+def scan_usn_journal(progress_callback=None, pct=76):
+    """
+    Analyse le journal de modifications NTFS (USN Journal) à la recherche de fichiers
+    de triche supprimés récemment.
+    """
+    if progress_callback:
+        progress_callback("Forensique USN NTFS", pct, "Analyse des suppressions récentes sur le disque...")
+        
+    deleted_cheats = []
+    try:
+        # 1. Obtenir le Next USN
+        res = subprocess.run(
+            ["fsutil", "usn", "queryjournal", "C:"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+        )
+        if res.returncode != 0:
+            return deleted_cheats
+
+        next_usn = None
+        for line in res.stdout.splitlines():
+            if "USN suivant" in line or "Next USN" in line:
+                parts = line.split(":")
+                if len(parts) > 1:
+                    next_usn_str = parts[1].strip().split()[0]
+                    next_usn = int(next_usn_str, 16)
+                    break
+        
+        if next_usn is None:
+            return deleted_cheats
+
+        # Lire les 15 derniers Mo (couvre généralement les dernières 24 à 72 heures)
+        start_usn = max(0, next_usn - 15 * 1024 * 1024)
+        
+        # 2. Lire le journal
+        read_res = subprocess.run(
+            ["fsutil", "usn", "readjournal", "C:", f"startusn={hex(start_usn)}", "csv"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10
+        )
+        if read_res.returncode != 0:
+            return deleted_cheats
+
+        seen = set()
+        for line in read_res.stdout.splitlines():
+            parts = line.split(",")
+            if len(parts) < 8:
+                continue
+            
+            # Index 1: FileName, Index 3: Reason, Index 4: TimeStamp
+            filename = parts[1].strip('"')
+            reason_str = parts[3].strip()
+            timestamp = parts[4].strip('"')
+            
+            try:
+                reason_val = int(reason_str, 16)
+            except ValueError:
+                continue
+                
+            # Vérifier si c'est une suppression (USN_REASON_FILE_DELETE = 0x00000200)
+            if (reason_val & 0x00000200) != 0:
+                name_lower = filename.lower()
+                ext = os.path.splitext(name_lower)[1]
+                
+                # Éviter les faux positifs sur les frameworks légitimes
+                if any(legit in name_lower for legit in LEGITIMATE_FRAMEWORKS):
+                    continue
+
+                if ext in CHEAT_EXTENSIONS:
+                    for cheat in SPECIFIC_CHEATS:
+                        if cheat in name_lower:
+                            key = (filename, timestamp)
+                            if key not in seen:
+                                seen.add(key)
+                                deleted_cheats.append({
+                                    "filename": filename,
+                                    "timestamp": timestamp,
+                                    "reason": f"Fichier de triche '{filename}' supprimé détecté dans le journal USN NTFS le {timestamp}."
+                                })
+                            break
+    except Exception:
+        pass
+        
+    return deleted_cheats
+
+# ─────────────────────────────────────────────
 # FORENSIQUE WINDOWS : PREFETCH SCANNER
 # ─────────────────────────────────────────────
-def scan_windows_prefetch(progress_callback=None, pct=75):
-    """
-    Analyse le dossier C:\\Windows\\Prefetch pour détecter les traces d'exécution
-    de programmes supprimés avant le scan (ex: EULEN.EXE-XXXXXX.pf).
-    """
+def scan_windows_prefetch(progress_callback=None, pct=73):
     prefetch_dir = r"C:\Windows\Prefetch"
     traces = []
     
@@ -55,10 +144,12 @@ def scan_windows_prefetch(progress_callback=None, pct=75):
             if not file.lower().endswith(".pf"):
                 continue
             
-            # Nom du programme dans le fichier prefetch (ex: EULEN.EXE-1234ABCD.pf -> EULEN.EXE)
             exec_name = file.split("-")[0].lower()
             
-            for cheat in KNOWN_CHEATS:
+            if any(legit in exec_name for legit in LEGITIMATE_FRAMEWORKS):
+                continue
+
+            for cheat in SPECIFIC_CHEATS:
                 if cheat in exec_name:
                     pf_path = os.path.join(prefetch_dir, file)
                     mtime = os.path.getmtime(pf_path)
@@ -70,7 +161,7 @@ def scan_windows_prefetch(progress_callback=None, pct=75):
                         "prefetch_file"  : file,
                         "last_executed"  : last_exec,
                         "severity"       : "CRITICAL",
-                        "description"    : f"Trace d'exécution Windows (Prefetch) trouvée pour '{exec_name}' (Dernière exécution : {last_exec})"
+                        "description"    : f"Trace d'exécution Windows (Prefetch) pour '{exec_name}' (Dernière exécution : {last_exec})"
                     })
                     break
     except (PermissionError, OSError):
@@ -78,14 +169,7 @@ def scan_windows_prefetch(progress_callback=None, pct=75):
 
     return traces
 
-# ─────────────────────────────────────────────
-# DÉTECTION DU FORMATAGE (DATE INSTALLATION OS)
-# ─────────────────────────────────────────────
 def get_os_installation_date():
-    """
-    Récupère la date d'installation initiale de Windows via le registre.
-    Permet de savoir si le PC a été formaté récemment.
-    """
     try:
         ps_cmd = "(Get-CimInstance Win32_OperatingSystem).InstallDate.ToString('yyyy-MM-dd HH:mm:ss')"
         res = subprocess.run(
@@ -114,12 +198,22 @@ def get_os_installation_date():
         "status_text": "Non déterminé"
     }
 
-def _is_fivem_cheat_file(filename: str) -> bool:
-    name = filename.lower()
-    ext = os.path.splitext(name)[1]
+def _is_fivem_cheat_file(filename: str, full_path: str = "") -> bool:
+    name_lower = filename.lower()
+    path_lower = full_path.lower()
+    ext = os.path.splitext(name_lower)[1]
+    
     if ext not in CHEAT_EXTENSIONS:
         return False
-    return any(cheat in name for cheat in KNOWN_CHEATS)
+
+    if any(legit in name_lower or legit in path_lower for legit in LEGITIMATE_FRAMEWORKS):
+        return False
+
+    for cheat in SPECIFIC_CHEATS:
+        if cheat in name_lower:
+            return True
+
+    return False
 
 def scan_fivem_cheat_files(progress_callback=None, start_pct=65, end_pct=72):
     suspects = []
@@ -135,17 +229,17 @@ def scan_fivem_cheat_files(progress_callback=None, start_pct=65, end_pct=72):
             for root, dirs, files in os.walk(directory):
                 dirs[:] = [
                     d for d in dirs
-                    if d.lower() not in {"windows", "program files", "program files (x86)", "system32", "syswow64"}
+                    if d.lower() not in {"windows", "program files", "program files (x86)", "system32", "syswow64", "ea", "playnite", "razor"}
                 ]
                 for file in files:
-                    if _is_fivem_cheat_file(file):
-                        full_path = os.path.join(root, file)
+                    full_path = os.path.join(root, file)
+                    if _is_fivem_cheat_file(file, full_path):
                         suspects.append({
                             "file": file,
                             "path": full_path,
                             "directory": root,
                             "severity": "HIGH",
-                            "reason": f"Signature cheat connue dans '{file}'"
+                            "reason": f"Signature spécifique de cheat FiveM trouvée dans '{file}'"
                         })
         except (PermissionError, OSError):
             pass
@@ -338,9 +432,13 @@ def run_system_scan(progress_callback=None):
         end_pct=72
     )
 
-    # ── 75% : Forensique Windows Prefetch (Traces d'exécution historiques)
-    prefetch_traces = scan_windows_prefetch(progress_callback=progress_callback, pct=75)
-    step("Forensique Prefetch", 78, f"{len(prefetch_traces)} trace(s) d'exécution historique(s)")
+    # ── 73% : Forensique Windows Prefetch
+    prefetch_traces = scan_windows_prefetch(progress_callback=progress_callback, pct=73)
+    time.sleep(0.05)
+
+    # ── 76% : Forensique Journal USN NTFS (Fichiers supprimés récemment)
+    usn_traces = scan_usn_journal(progress_callback=progress_callback, pct=76)
+    step("Forensique USN NTFS", 79, f"{len(usn_traces)} fichier(s) supprimé(s) identifié(s)")
     time.sleep(0.05)
 
     # ── 80% : Regroupement
@@ -384,12 +482,13 @@ def run_system_scan(progress_callback=None):
             "signature"       : sig,
             "instances_count" : app_data["instances_count"],
             "pids"            : app_data["pids"],
-            "total_dll_count" : app_data["loaded_dll_count"]
+            "total_dll_count" : app_data["loaded_dll_count"],
+            "status_type"     : "PROCESSUS_EN_COURS"
         }
         app_item["risk_assessment"] = evaluate_app_risk(app_item)
         applications.append(app_item)
 
-    # Ajouter les fichiers physiques suspects FiveM
+    # Ajouter les fichiers physiques suspects (0 Instances = Fichier sur Disque Non Exécuté)
     if fivem_suspects:
         for suspect in fivem_suspects:
             applications.append({
@@ -400,17 +499,18 @@ def run_system_scan(progress_callback=None):
                 "instances_count" : 0,
                 "pids"            : [],
                 "total_dll_count" : 0,
+                "status_type"     : "ARTEFACT_DISQUE",
                 "risk_assessment" : {
-                    "risk_score"  : 90,
+                    "risk_score"  : 85,
                     "observations": [{
                         "severity"   : "CRITICAL",
-                        "title"      : "Fichier Cheat FiveM Détecté",
+                        "title"      : "Fichier Suspect Détecté sur le Disque",
                         "description": suspect["reason"]
                     }]
                 }
             })
 
-    # Ajouter les traces forensiques Prefetch (Programme exécuté puis supprimé)
+    # Ajouter les traces forensiques Prefetch
     if prefetch_traces:
         for trace in prefetch_traces:
             applications.append({
@@ -421,12 +521,35 @@ def run_system_scan(progress_callback=None):
                 "instances_count" : 0,
                 "pids"            : [],
                 "total_dll_count" : 0,
+                "status_type"     : "TRACE_HISTORIQUE_PREFETCH",
                 "risk_assessment" : {
-                    "risk_score"  : 85,
+                    "risk_score"  : 90,
                     "observations": [{
                         "severity"   : "CRITICAL",
-                        "title"      : "Trace Historique d'Exécution (Prefetch)",
+                        "title"      : "Trace Historique d'Exécution Windows (Prefetch)",
                         "description": trace["description"]
+                    }]
+                }
+            })
+
+    # Ajouter les traces forensiques USN Journal (Fichiers supprimés 72h)
+    if usn_traces:
+        for trace in usn_traces:
+            applications.append({
+                "app_name"        : trace["filename"],
+                "exe_path"        : f"USN_JOURNAL_DELETED_FILE",
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "UsnDeletedTrace"},
+                "instances_count" : 0,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "TRACE_HISTORIQUE_USN",
+                "risk_assessment" : {
+                    "risk_score"  : 95,
+                    "observations": [{
+                        "severity"   : "CRITICAL",
+                        "title"      : "Fichier Supprimé Détecté dans le Journal NTFS (USN)",
+                        "description": trace["reason"]
                     }]
                 }
             })
@@ -435,7 +558,7 @@ def run_system_scan(progress_callback=None):
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
     # ── 100% : Terminé
-    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(prefetch_traces)} trace(s) Prefetch")
+    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(prefetch_traces)} trace(s) Prefetch | {len(usn_traces)} trace(s) USN")
 
     return {
         "timestamp"        : time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -449,9 +572,11 @@ def run_system_scan(progress_callback=None):
             "ram_percent"         : ram_usage,
             "fivem_suspects_count": len(fivem_suspects),
             "prefetch_traces_count": len(prefetch_traces),
+            "usn_traces_count"    : len(usn_traces)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
+        "usn_traces"       : usn_traces,
         "risk_summary"     : risk_summary,
         "applications"     : applications
     }
