@@ -1,0 +1,28 @@
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Config local
+config.json
+scans_admin/
+
+# Web (repo séparé)
+web/
+
+# Server (plus nécessaire en production)
+server/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
