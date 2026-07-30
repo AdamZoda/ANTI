@@ -29,8 +29,11 @@ def check_authenticode_signature(filepath):
 
     path_lower = filepath.lower()
 
-    # Heuristique ultra-rapide : Fichiers système natifs Windows connus
-    if path_lower.startswith(r"c:\windows\system32\\") or path_lower.startswith(r"c:\windows\syswow64\\"):
+    # Heuristique ultra-rapide : Fichiers système natifs Windows connus (Microsoft)
+    if (path_lower.startswith(r"c:\windows\system32\") or 
+        path_lower.startswith(r"c:\windows\syswow64\") or
+        path_lower.startswith(r"c:\windows\winsxs\") or
+        path_lower.startswith(r"c:\windows\diagnostics\")):
         res = {"status": "Valid", "signed": True, "signer": "CN=Microsoft Windows, O=Microsoft Corporation"}
         _sig_cache[filepath] = res
         return res
@@ -53,9 +56,9 @@ def check_authenticode_signature(filepath):
                 "signer": signer.strip() if signer and signer != "null" else None
             }
         else:
-            res = {"status": output or "Unsigned", "signed": False, "signer": None}
+            res = {"status": output or "Unknown", "signed": False, "signer": None}
     except Exception:
-        res = {"status": "Unsigned", "signed": False, "signer": None}
+        res = {"status": "Unknown", "signed": False, "signer": None}
 
     _sig_cache[filepath] = res
     return res

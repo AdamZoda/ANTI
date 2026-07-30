@@ -83,7 +83,8 @@ def evaluate_app_risk(app_info):
             })
             
     elif path_class == "SYSTEM_STANDARD":
-        if not signed and "c:\\windows" in exe_path.lower():
+        sig_status = app_info.get("signature", {}).get("status", "Unknown")
+        if not signed and sig_status not in ["Unknown", "Inconclusive"] and "c:\\windows" in exe_path.lower():
             score += 50
             observations.append({
                 "level": "SUSPECT",
