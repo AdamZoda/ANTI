@@ -132,18 +132,34 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
         if app.get("signature", {}).get("status") == "PrefetchTrace":
             has_prefetch_trace = True
 
-    # ── Évaluation de la Confiance
+    # ── Évaluation de la Confiance & Détection d'Anti-Forensics (Nettoyage)
     confidence_level = "ÉLEVÉ (HIGH)"
     confidence_score = 95
     confidence_reasons = []
 
+    # 1. Formatage Récent
     if system_info and system_info.get("is_recent_reformat"):
         confidence_level = "FAIBLE (LOW - Formatage Récent)"
         confidence_score = 40
         confidence_reasons.append("Windows a été réinstallé dans les 48 dernières heures (traces historiques limitées).")
-        # Ajout d'une pénalité si formatage récent
         if max_score < 35:
             max_score = 35
+
+    # 2. Nettoyage Manuel de Prefetch (Anti-Forensics Wiping)
+    if system_info and system_info.get("is_prefetch_wiped") and not system_info.get("is_recent_reformat"):
+        confidence_level = "SUSPECT (NETTOYAGE MANUEL PREFETCH)"
+        confidence_score = 30
+        pf_count = system_info.get("prefetch_file_count", 0)
+        confidence_reasons.append(f"Nettoyage manuel des traces d'exécution détecté ! (Dossier C:\\Windows\\Prefetch purgé : seulement {pf_count} fichiers .pf trouvés).")
+        # Augmenter le score de risque global car purger le Prefetch est un comportement typique d'évitement
+        if max_score < 65:
+            max_score = 65
+
+    # 3. Périphérique USB débranché récemment
+    if system_info and system_info.get("has_disconnected_usb"):
+        confidence_reasons.append("Un ou plusieurs périphériques de stockage USB / SSD externes ont été déconnectés récemment de la machine.")
+        if max_score < 45:
+            max_score = 45
 
     elif has_prefetch_trace:
         confidence_level = "MOYEN-ÉLEVÉ (MEDIUM-HIGH)"

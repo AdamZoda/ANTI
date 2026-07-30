@@ -132,8 +132,8 @@ def scan_usn_journal_drive(drive_letter):
 
                 is_suspicious_deletion = False
                 
-                # 1. Tous les fichiers .asi et .lua supprimés sont suspects
-                if ext in {".asi", ".lua"}:
+                # 1. Tous les fichiers .asi, .lua et .pf (fichiers Prefetch effacés) supprimés sont suspects
+                if ext in {".asi", ".lua", ".pf"}:
                     is_suspicious_deletion = True
                 # 2. Fichiers .exe, .dll, .bat, .ps1, .sys, .ini avec mot-clé suspect
                 elif ext in CHEAT_EXTENSIONS:
@@ -148,7 +148,7 @@ def scan_usn_journal_drive(drive_letter):
                             "filename": filename,
                             "drive": drive_letter,
                             "timestamp": timestamp,
-                            "reason": f"Fichier supprimé suspect '{filename}' détecté sur {drive_letter} dans le journal USN le {timestamp}."
+                            "reason": f"Fichier supprimé suspect '{filename}' ({'Trace Prefetch Effacée' if ext == '.pf' else 'Fichier Suspect'}) détecté sur {drive_letter} dans le journal USN le {timestamp}."
                         })
     except Exception:
         pass
@@ -173,23 +173,31 @@ def scan_usn_journal_all_drives(drives, progress_callback=None, pct=76):
     return all_deleted
 
 # ─────────────────────────────────────────────
-# FORENSIQUE WINDOWS : PREFETCH SCANNER
+# FORENSIQUE WINDOWS : PREFETCH SCANNER & DETECTEUR DE NETTOYAGE
 # ─────────────────────────────────────────────
 def scan_windows_prefetch(progress_callback=None, pct=73):
     prefetch_dir = r"C:\Windows\Prefetch"
     traces = []
+    total_pf_count = 0
+    is_wiped = False
     
     if progress_callback:
         progress_callback("Forensique Prefetch", pct, "Analyse des traces d'exécution Windows...")
 
     if not os.path.exists(prefetch_dir):
-        return traces
+        return {"traces": traces, "total_pf_count": 0, "is_wiped": True}
 
     try:
-        for file in os.listdir(prefetch_dir):
-            if not file.lower().endswith(".pf"):
-                continue
-            
+        all_entries = os.listdir(prefetch_dir)
+        pf_files = [f for f in all_entries if f.lower().endswith(".pf")]
+        total_pf_count = len(pf_files)
+
+        # Une machine Windows normale contient 100 à 500 fichiers .pf.
+        # Moins de 15 fichiers .pf signale un nettoyage manuel récent (Nettoyage de Traces).
+        if total_pf_count < 15:
+            is_wiped = True
+
+        for file in pf_files:
             exec_name = file.split("-")[0].lower()
             
             if any(legit in exec_name for legit in LEGITIMATE_FRAMEWORKS):
@@ -213,7 +221,11 @@ def scan_windows_prefetch(progress_callback=None, pct=73):
     except (PermissionError, OSError):
         pass
 
-    return traces
+    return {
+        "traces": traces,
+        "total_pf_count": total_pf_count,
+        "is_wiped": is_wiped
+    }
 
 # ─────────────────────────────────────────────
 # FORENSIQUE : HISTORIQUE DES PÉRIPHÉRIQUES USB/SSD EXTERNES
@@ -678,8 +690,11 @@ def run_system_scan(progress_callback=None):
         end_pct=72
     )
 
-    # ── 73% : Forensique Windows Prefetch
-    prefetch_traces = scan_windows_prefetch(progress_callback=progress_callback, pct=73)
+    # ── 73% : Forensique Windows Prefetch & Wiping Detection
+    prefetch_res = scan_windows_prefetch(progress_callback=progress_callback, pct=73)
+    prefetch_traces = prefetch_res.get("traces", [])
+    system_info["prefetch_file_count"] = prefetch_res.get("total_pf_count", 0)
+    system_info["is_prefetch_wiped"] = prefetch_res.get("is_wiped", False)
     time.sleep(0.05)
 
     # ── 76% : Forensique Journal USN NTFS - MULTI-DISQUES
@@ -689,6 +704,9 @@ def run_system_scan(progress_callback=None):
 
     # ── 79% : Forensique USB/SSD historique
     usb_history = scan_usb_storage_history(progress_callback=progress_callback, pct=79)
+    disconnected_usbs = [u for u in usb_history if not u.get("is_connected")]
+    system_info["has_disconnected_usb"] = len(disconnected_usbs) > 0
+    system_info["disconnected_usb_count"] = len(disconnected_usbs)
 
     # ── 82% : Regroupement
     step("Regroupement Apps", 82, "Regroupement des sous-processus par Application...")
