@@ -1,18 +1,27 @@
 # ANTI Defense System - Installation Script
-# Usage: powershell -ExecutionPolicy Bypass -File install.ps1
+# Usage: powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/AdamZoda/ANTI/main/install.ps1 | iex"
 
 $ErrorActionPreference = "Stop"
 
-$REPO_URL = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
+$REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
 $verPath    = "$installDir\version.txt"
 
+# Anciens emplacements possibles (nettoyage des versions précédentes)
+$LEGACY_PATHS = @(
+    "$env:TEMP\anti-scan.exe",
+    "$env:TEMP\AntiScan",
+    "$env:LOCALAPPDATA\AntiScan",
+    "$env:APPDATA\AntiScan",
+    "$env:USERPROFILE\Downloads\anti-scan.exe"
+)
+
 # --- Couleurs ---
-function Write-OK   { param($msg) Write-Host "[OK] $msg"  -ForegroundColor Green }
-function Write-INFO { param($msg) Write-Host "[..] $msg"  -ForegroundColor Cyan  }
-function Write-WARN { param($msg) Write-Host "[!]  $msg"  -ForegroundColor Yellow }
-function Write-ERR  { param($msg) Write-Host "[X]  $msg"  -ForegroundColor Red   }
+function Write-OK   { param($msg) Write-Host "[OK] $msg" -ForegroundColor Green  }
+function Write-INFO { param($msg) Write-Host "[..] $msg" -ForegroundColor Cyan   }
+function Write-WARN { param($msg) Write-Host "[!]  $msg" -ForegroundColor Yellow }
+function Write-ERR  { param($msg) Write-Host "[X]  $msg" -ForegroundColor Red    }
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor DarkBlue
@@ -20,49 +29,40 @@ Write-Host "   ANTI DEFENSE SYSTEM - Installer"              -ForegroundColor Wh
 Write-Host "================================================" -ForegroundColor DarkBlue
 Write-Host ""
 
-# --- Vérification de la version locale ---
-$localVersion = "0.0"
-if (Test-Path $verPath) {
-    $localVersion = (Get-Content $verPath -Raw).Trim()
+# --- Nettoyage des anciennes versions ---
+Write-INFO "Nettoyage des anciennes versions..."
+foreach ($path in $LEGACY_PATHS) {
+    if (Test-Path $path) {
+        try {
+            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
 }
+Write-OK "Anciennes versions supprimées."
 
 # --- Récupération de la version distante ---
+$remoteVersion = "0.0"
 try {
     Write-INFO "Vérification de la dernière version disponible..."
-    $remoteVersion = (Invoke-RestMethod -Uri "$REPO_URL/version.json").version
-    Write-INFO "Version locale   : v$localVersion"
+    $remoteVersion = (Invoke-RestMethod -Uri "$REPO_URL/version.json" -UseBasicParsing).version
     Write-INFO "Version distante : v$remoteVersion"
 } catch {
-    Write-WARN "Impossible de vérifier la version en ligne. Installation forcée..."
-    $remoteVersion = "0.0"
+    Write-WARN "Impossible de vérifier la version. Téléchargement forcé..."
 }
 
-# --- Téléchargement si nécessaire ---
-if ((-not (Test-Path $exePath)) -or ($remoteVersion -ne $localVersion)) {
+# --- Création du dossier propre ---
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
-    # Créer le dossier si absent
-    if (!(Test-Path $installDir)) {
-        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    }
-
-    Write-INFO "Téléchargement de anti-scan.exe (v$remoteVersion)..."
-
-    try {
-        # Désactiver la vérification de progression pour accélérer le téléchargement
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe" -OutFile $exePath -UseBasicParsing
-
-        # Enregistrer la version installée
-        $remoteVersion | Out-File -FilePath $verPath -Encoding UTF8 -NoNewline
-
-        Write-OK "Installation réussie - v$remoteVersion"
-    } catch {
-        Write-ERR "Échec du téléchargement : $_"
-        exit 1
-    }
-
-} else {
-    Write-OK "Déjà à jour - v$localVersion"
+# --- Téléchargement de l'exe ---
+Write-INFO "Téléchargement de anti-scan.exe (v$remoteVersion)..."
+try {
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe" -OutFile $exePath -UseBasicParsing
+    $remoteVersion | Out-File -FilePath $verPath -Encoding UTF8 -NoNewline
+    Write-OK "Téléchargement réussi - v$remoteVersion"
+} catch {
+    Write-ERR "Échec du téléchargement : $_"
+    exit 1
 }
 
 # --- Lancement du scan ---
@@ -74,19 +74,14 @@ try {
     Start-Process -FilePath $exePath -Wait -NoNewWindow
 } catch {
     Write-ERR "Erreur au lancement : $_"
-    exit 1
 }
 
-# --- Nettoyage automatique ---
+# --- Nettoyage automatique complet ---
 Write-Host ""
 Write-INFO "Nettoyage automatique en cours..."
-
 try {
-    # Supprimer le dossier complet (exe + version.txt)
     if (Test-Path $installDir) {
         Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     Write-OK "Nettoyage terminé. Aucune trace laissée sur le PC."
-} catch {
-    # Échec silencieux — ne pas alerter l'utilisateur
-}
+} catch {}
