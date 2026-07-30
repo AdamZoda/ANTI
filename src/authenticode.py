@@ -47,6 +47,8 @@ def check_authenticode_signature(filepath):
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=1.5
         )
         output = result.stdout.strip()

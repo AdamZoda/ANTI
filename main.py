@@ -3,7 +3,7 @@ from src.ui import print_banner, render_progress, print_client_completion
 from src.scanner import run_system_scan
 from src.admin_sync import get_next_scan_id_from_supabase, transmit_scan_to_supabase
 
-CURRENT_VERSION = "1.2"
+CURRENT_VERSION = "1.3"
 
 def main():
     print_banner()
