@@ -8,14 +8,8 @@ CURRENT_VERSION = "1.7"
 def main():
     print_banner()
     
-    # 0. Vérification des mises à jour
-    from src.admin_sync import check_for_updates
-    update_dispo, latest_ver, download_url = check_for_updates(CURRENT_VERSION)
-    if update_dispo:
-        print(f"\033[91m[!] UNE NOUVELLE MISE À JOUR EST DISPONIBLE (v{latest_ver})\033[0m")
-        print("Veuillez télécharger la dernière version officielle pour continuer :")
-        print(f"\033[96m► {download_url}\033[0m\n")
-        sys.exit(0)
+    # 0. Vérification / Log version (silencieuse)
+    # L'installer se charge déjà de télécharger la dernière version depuis GitHub.
 
 
     # 1. Récupérer le prochain scan_id depuis Supabase

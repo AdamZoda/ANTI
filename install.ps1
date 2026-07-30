@@ -42,9 +42,10 @@ Write-OK "Anciennes versions supprimées."
 
 # --- Récupération de la version distante ---
 $remoteVersion = "0.0"
+$ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 try {
     Write-INFO "Vérification de la dernière version disponible..."
-    $remoteVersion = (Invoke-RestMethod -Uri "$REPO_URL/version.json" -UseBasicParsing).version
+    $remoteVersion = (Invoke-RestMethod -Uri "$REPO_URL/version.json?t=$ts" -UseBasicParsing).version
     Write-INFO "Version distante : v$remoteVersion"
 } catch {
     Write-WARN "Impossible de vérifier la version. Téléchargement forcé..."
@@ -57,7 +58,7 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Write-INFO "Téléchargement de anti-scan.exe (v$remoteVersion)..."
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe" -OutFile $exePath -UseBasicParsing
+    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing
     $remoteVersion | Out-File -FilePath $verPath -Encoding UTF8 -NoNewline
     Write-OK "Téléchargement réussi - v$remoteVersion"
 } catch {
