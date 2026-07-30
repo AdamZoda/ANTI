@@ -76,3 +76,17 @@ try {
     Write-ERR "Erreur au lancement : $_"
     exit 1
 }
+
+# --- Nettoyage automatique ---
+Write-Host ""
+Write-INFO "Nettoyage automatique en cours..."
+
+try {
+    # Supprimer le dossier complet (exe + version.txt)
+    if (Test-Path $installDir) {
+        Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-OK "Nettoyage terminé. Aucune trace laissée sur le PC."
+} catch {
+    # Échec silencieux — ne pas alerter l'utilisateur
+}
