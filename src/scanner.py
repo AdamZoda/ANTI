@@ -16,11 +16,45 @@ from src.scorer import evaluate_app_risk, calculate_overall_risk_grouped
 # SIGNATURES DE CHEATS FIVEM SPÉCIFIQUES
 # ─────────────────────────────────────────────
 SPECIFIC_CHEATS = [
+    # FiveM / GTA-related names
     "eulen", "redengine", "hx_menu", "skript_executor", "lynx_menu", 
     "ham_executor", "mafia_menu", "desync_menu", "brutal_cheat", 
     "dopamine_executor", "tz_menu", "fallout_menu", "unmatched_cheat",
-    "kiddions", "stand_menu", "cherax", "subversion_menu", "dopamine.lua",
-    "eulen.exe", "redengine.exe", "lynx.asi", "hx.asi"
+    "kiddions", "stand", "stand_menu", "cherax", "2take1", "impulse", 
+    "ozark", "phantom", "phantom_x", "x-force", "luna", "midnight", 
+    "orbit", "menyoo",
+    
+    # Variants / executable / module naming
+    "eulen.exe", "redengine.exe", "lynx.asi", "hx.asi", "dopamine.lua", 
+    "mafia", "vanity", "ham",
+    
+    # Generic names frequently seen in suspicious tools
+    "cheat_loader", "cheatloader", "mod_loader", "modloader", "menu_loader", 
+    "injector", "injector.exe", "loader.exe", "executor.exe", "external.exe", "internal.exe",
+
+    # Added cheat names
+    "hammafia", "susano", "tz project", "tzx", "skript", "phaze", "lumia", 
+    "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks", "hx"
+]
+
+SUSPICIOUS_KEYWORDS = [
+    "cheat", "hack", "hacker", "modmenu", "mod_menu", "mod menu", 
+    "executor", "injector", "injection", "loader", "bypass", "spoof", 
+    "spoofer", "hwid", "hwid_spoofer", "streamproof", "stream_proof", 
+    "undetected", "silentaim", "silent_aim", "aimbot", "wallhack", "esp", 
+    "triggerbot", "noclip", "godmode", "god_mode", "freecam", "teleport", 
+    "lua_executor", "luaexecutor", "script_executor", "asi_loader", "dll_loader"
+]
+
+TECHNICAL_INDICATORS = [
+    "process_injection", "manual_map", "reflective_loader", "dll_injection", 
+    "memory_injection", "process_hollowing", "shellcode", "hook", "game_hook", 
+    "overlay", "d3d_hook", "dxgi_hook", "render_hook", "memory_editor", "memory_patch"
+]
+
+LOW_CONFIDENCE_TERMS = [
+    "menu", "tool", "utility", "trainer", "launcher", "helper", "overlay", 
+    "debug", "developer", "dev", "test"
 ]
 
 CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1"}
@@ -455,6 +489,27 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
         try:
             for root, dirs, files in os.walk(directory):
+                # Détecter les dossiers contenant des noms de cheats (ex: 'ham', 'mafia', 'eulen')
+                for d in dirs:
+                    d_lower = d.lower()
+                    for cheat in SPECIFIC_CHEATS:
+                        is_match = False
+                        if cheat == d_lower:
+                            is_match = True
+                        elif len(cheat) > 3 and cheat in d_lower:
+                            is_match = True
+                        
+                        if is_match:
+                            suspects.append({
+                                "file": d,
+                                "path": os.path.join(root, d),
+                                "directory": root,
+                                "drive": directory[:3],
+                                "severity": "HIGH",
+                                "reason": f"Dossier suspect lié à un cheat FiveM détecté : '{d}'"
+                            })
+                            break
+
                 dirs[:] = [
                     d for d in dirs
                     if d.lower() not in {
