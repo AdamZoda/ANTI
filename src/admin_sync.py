@@ -73,3 +73,24 @@ def transmit_scan_to_supabase(scan_id, scan_data):
             "mode": "Supabase Error",
             "error": str(e)
         }
+
+def check_for_updates(current_version):
+    """
+    Vérifie si une nouvelle version est disponible sur GitHub.
+    Retourne (True, latest_version, download_url) si une mise à jour est disponible.
+    """
+    try:
+        url = "https://raw.githubusercontent.com/AdamZoda/ANTI/main/version.json"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "ANTI-Defense-Scanner/1.0"
+        })
+        with urllib.request.urlopen(req, timeout=4) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            latest = data.get("version", current_version)
+            download_url = data.get("download_url", "https://github.com/AdamZoda/ANTI/releases")
+            if float(latest) > float(current_version):
+                return True, latest, download_url
+    except Exception:
+        pass
+    return False, None, None
+

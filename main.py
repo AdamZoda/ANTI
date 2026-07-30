@@ -3,8 +3,20 @@ from src.ui import print_banner, render_progress, print_client_completion
 from src.scanner import run_system_scan
 from src.admin_sync import get_next_scan_id_from_supabase, transmit_scan_to_supabase
 
+CURRENT_VERSION = "1.1"
+
 def main():
     print_banner()
+    
+    # 0. Vérification des mises à jour
+    from src.admin_sync import check_for_updates
+    update_dispo, latest_ver, download_url = check_for_updates(CURRENT_VERSION)
+    if update_dispo:
+        print(f"\033[91m[!] UNE NOUVELLE MISE À JOUR EST DISPONIBLE (v{latest_ver})\033[0m")
+        print("Veuillez télécharger la dernière version officielle pour continuer :")
+        print(f"\033[96m► {download_url}\033[0m\n")
+        sys.exit(0)
+
     print("\033[93m[➔] Initialisation de l'analyse système...\033[0m\n")
 
     # 1. Récupérer le prochain scan_id depuis Supabase
