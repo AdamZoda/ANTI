@@ -7,8 +7,9 @@ venv/
 
 # PyInstaller / Build outputs
 build/
-dist/
 *.spec
+dist/*
+!dist/anti-scan.exe
 
 # Config local
 config.json
