@@ -7,11 +7,11 @@ SHIELD_ICON = "🛡️ "
 
 BANNER_LOGO = f"""\033[96m
   ╔══════════════════════════════════════════════════════════════════════════════╗
-  ║  █████╗ ███╗  ██╗████████╗██╗    {SHIELD_ICON} ANTI DEFENSE SYSTEM v1.6         ║
+  ║  █████╗ ███╗  ██╗████████╗██╗    {SHIELD_ICON} ANTI DEFENSE SYSTEM v1.7         ║
   ║ ██╔══██╗████╗ ██║╚══██╔══╝██║    System Integrity & Telemetry Scanner     ║
   ║ ███████║██╔██╗██║   ██║   ██║    Multi-Drive · USB Forensics · NTFS USN  ║
   ║ ██╔══██║██║╚████║   ██║   ██║                                             ║
-  ║ ██║  ██║██║ ╚███║   ██║   ╚═╝    100% Defensive Security Engine          ║
+  ║ ██║  ██║██║ ╚███║   ██║   ╚═╝    Clean Terminal UI · 100% Defensive      ║
   ╚══════════════════════════════════════════════════════════════════════════════╝
 \033[0m"""
 
