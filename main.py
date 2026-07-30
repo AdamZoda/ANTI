@@ -17,7 +17,6 @@ def main():
         print(f"\033[96m► {download_url}\033[0m\n")
         sys.exit(0)
 
-    print("\033[93m[➔] Initialisation de l'analyse système...\033[0m\n")
 
     # 1. Récupérer le prochain scan_id depuis Supabase
     scan_id = get_next_scan_id_from_supabase()
@@ -35,10 +34,8 @@ def main():
     # 4. Affichage final anonymisé pour le Client
     print_client_completion(scan_id)
 
-    if result.get("success"):
-        print("\033[92m[✓] Données synchronisées avec le serveur de sécurité.\033[0m\n")
-    else:
-        print("\033[91m[!] Synchronisation échouée — les données seront retransmises.\033[0m\n")
+    # Sync status — masqué côté client (admin seulement)
+    _ = result  # résultat loggué côté serveur uniquement
 
 if __name__ == "__main__":
     main()
