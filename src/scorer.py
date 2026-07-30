@@ -65,9 +65,8 @@ def evaluate_app_risk(app_info):
             })
             
     elif path_class == "USER_PROGRAM_STANDARD":
-        # Dossiers standards comme AppData\Local\Programs (VSCode, Chrome, Discord, Antigravity IDE)
         if not signed:
-            score += 5  # Score minime (simple constatation)
+            score += 5
             observations.append({
                 "level": "OBSERVATION",
                 "severity": "INFO",
@@ -95,7 +94,6 @@ def evaluate_app_risk(app_info):
 
     final_score = min(100, score)
     
-    # Classification du verdict
     if final_score >= 60:
         verdict_level = "HIGH_RISK"
     elif final_score >= 30:
@@ -110,13 +108,16 @@ def evaluate_app_risk(app_info):
         "is_suspicious": final_score >= 35
     }
 
-def calculate_overall_risk_grouped(apps_list):
+def calculate_overall_risk_grouped(apps_list, system_info=None):
     """
-    Calcule le risque global basé sur la liste des APPLICATIONS regroupées (et non des PIDs bruts).
+    Calcule le risque global et le niveau de confiance (Confidence Rating).
+    Prend en compte la présence actuelle, les traces historiques (Prefetch)
+    et les indices de formatage récent.
     """
     max_score = 0
     suspicious_apps = 0
     total_observations = 0
+    has_prefetch_trace = False
     
     for app in apps_list:
         r = app.get("risk_assessment", {})
@@ -126,13 +127,36 @@ def calculate_overall_risk_grouped(apps_list):
         if r.get("is_suspicious"):
             suspicious_apps += 1
         total_observations += len(r.get("observations", []))
+        
+        # Vérifier si c'est une trace Prefetch
+        if app.get("signature", {}).get("status") == "PrefetchTrace":
+            has_prefetch_trace = True
 
+    # ── Évaluation de la Confiance
+    confidence_level = "ÉLEVÉ (HIGH)"
+    confidence_score = 95
+    confidence_reasons = []
+
+    if system_info and system_info.get("is_recent_reformat"):
+        confidence_level = "FAIBLE (LOW - Formatage Récent)"
+        confidence_score = 40
+        confidence_reasons.append("Windows a été réinstallé dans les 48 dernières heures (traces historiques limitées).")
+        # Ajout d'une pénalité si formatage récent
+        if max_score < 35:
+            max_score = 35
+
+    elif has_prefetch_trace:
+        confidence_level = "MOYEN-ÉLEVÉ (MEDIUM-HIGH)"
+        confidence_score = 80
+        confidence_reasons.append("Traces d'exécution historiques (Prefetch) détectées pour des fichiers supprimés.")
+
+    # ── Verdict final
     if max_score >= 60:
         threat_level = "ÉLEVÉ (HIGH)"
-        verdict = "CHEATER"
+        verdict = "CHEATER (Triche Détectée ou Exécutée)"
     elif max_score >= 30:
         threat_level = "MODÉRÉ (MEDIUM)"
-        verdict = "ANORMAL"
+        verdict = "ANORMAL (À Inspecter)"
     else:
         threat_level = "FAIBLE (LOW - SÉCURISÉ)"
         verdict = "CLEAN"
@@ -141,6 +165,9 @@ def calculate_overall_risk_grouped(apps_list):
         "overall_risk_score": max_score,
         "threat_level": threat_level,
         "verdict": verdict,
+        "confidence_level": confidence_level,
+        "confidence_score": confidence_score,
+        "confidence_reasons": confidence_reasons,
         "suspicious_applications_count": suspicious_apps,
         "total_applications_count": len(apps_list),
         "total_observations_count": total_observations
