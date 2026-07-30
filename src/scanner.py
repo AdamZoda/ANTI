@@ -90,7 +90,8 @@ def scan_usn_journal_drive(drive_letter):
         if next_usn is None:
             return deleted_cheats
 
-        start_usn = max(0, next_usn - 15 * 1024 * 1024)
+        # Lire les 50 derniers Mo (couvre jusqu'à 72h d'activité système)
+        start_usn = max(0, next_usn - 50 * 1024 * 1024)
         
         read_res = subprocess.run(
             ["fsutil", "usn", "readjournal", f"{drive_letter}", f"startusn={hex(start_usn)}", "csv"],
@@ -98,6 +99,13 @@ def scan_usn_journal_drive(drive_letter):
         )
         if read_res.returncode != 0:
             return deleted_cheats
+
+        SUSPECT_KEYWORDS = [
+            "cheat", "inject", "loader", "bypass", "hack", "exploit", "spoofer",
+            "menu", "mod", "hook", "trainer", "dumper", "eulen", "redengine",
+            "lynx", "kiddion", "stand", "cherax", "subversion", "dopamine", "fallout",
+            "unmatched", "mafia", "desync", "brutal", "skript", "hx"
+        ]
 
         seen = set()
         for line in read_res.stdout.splitlines():
@@ -114,6 +122,7 @@ def scan_usn_journal_drive(drive_letter):
             except ValueError:
                 continue
                 
+            # USN_REASON_FILE_DELETE = 0x00000200
             if (reason_val & 0x00000200) != 0:
                 name_lower = filename.lower()
                 ext = os.path.splitext(name_lower)[1]
@@ -121,19 +130,26 @@ def scan_usn_journal_drive(drive_letter):
                 if any(legit in name_lower for legit in LEGITIMATE_FRAMEWORKS):
                     continue
 
-                if ext in CHEAT_EXTENSIONS:
-                    for cheat in SPECIFIC_CHEATS:
-                        if cheat in name_lower:
-                            key = (filename, timestamp)
-                            if key not in seen:
-                                seen.add(key)
-                                deleted_cheats.append({
-                                    "filename": filename,
-                                    "drive": drive_letter,
-                                    "timestamp": timestamp,
-                                    "reason": f"Fichier supprimé '{filename}' détecté sur {drive_letter} dans le journal USN le {timestamp}."
-                                })
-                            break
+                is_suspicious_deletion = False
+                
+                # 1. Tous les fichiers .asi et .lua supprimés sont suspects
+                if ext in {".asi", ".lua"}:
+                    is_suspicious_deletion = True
+                # 2. Fichiers .exe, .dll, .bat, .ps1, .sys, .ini avec mot-clé suspect
+                elif ext in CHEAT_EXTENSIONS:
+                    if any(kw in name_lower for kw in SUSPECT_KEYWORDS):
+                        is_suspicious_deletion = True
+
+                if is_suspicious_deletion:
+                    key = (filename, timestamp)
+                    if key not in seen:
+                        seen.add(key)
+                        deleted_cheats.append({
+                            "filename": filename,
+                            "drive": drive_letter,
+                            "timestamp": timestamp,
+                            "reason": f"Fichier supprimé suspect '{filename}' détecté sur {drive_letter} dans le journal USN le {timestamp}."
+                        })
     except Exception:
         pass
         
