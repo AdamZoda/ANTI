@@ -5,6 +5,11 @@ __pycache__/
 venv/
 .venv/
 
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec
+
 # Config local
 config.json
 scans_admin/
@@ -12,7 +17,7 @@ scans_admin/
 # Web (repo séparé)
 web/
 
-# Server (plus nécessaire en production)
+# Server
 server/
 
 # IDE
