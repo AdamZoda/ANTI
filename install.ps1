@@ -11,25 +11,25 @@ Clear-Host
 
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
-$exePath    = "$installDir\ANTI.exe"
+$exePath    = "$installDir\anti-scan.exe"
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $CLEANUP_TARGETS = @(
-    "$env:TEMP\ANTI.exe",
+    "$env:TEMP\anti-scan.exe",
     "$env:TEMP\AntiScan*",
     "$env:LOCALAPPDATA\AntiScan*",
     "$env:APPDATA\AntiScan*",
-    "$env:USERPROFILE\Downloads\ANTI*.exe"
+    "$env:USERPROFILE\Downloads\anti-scan*.exe"
 )
 
-# 1. Téléchargement silencieux du nouvel exécutable ANTI.exe
+# 1. Téléchargement silencieux du nouvel exécutable anti-scan.exe
 $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$REPO_URL/dist/ANTI.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
 } catch {
     Write-Host "[X] Impossible de démarrer le scanner." -ForegroundColor Red
     exit 1
