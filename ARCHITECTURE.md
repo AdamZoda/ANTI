@@ -127,14 +127,6 @@ ANTI/
 
 ---
 
-## 🔍 Moteur de scoring (scorer.py)
-
-| Score | Verdict | Couleur |
-|-------|---------|---------|
-| 0 – 29 | **CLEAN** | 🟢 Vert |
-| 30 – 59 | **ANORMAL** | 🟡 Orange |
-| 60 – 100 | **CHEATER** | 🔴 Rouge |
-
 ### Critères de scoring par application
 
 | Condition | Score ajouté |
