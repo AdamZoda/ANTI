@@ -11,11 +11,11 @@ try {
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetConsoleWindow();
 '@
-    $type = Add-Type -MemberDefinition $memberDefinition -Name "Win32Utils" -Namespace "Win32" -PassThru
-    $hwnd = $type::GetConsoleWindow()
+    Add-Type -MemberDefinition $memberDefinition -Name "Win32Utils" -Namespace "Win32" | Out-Null
+    $hwnd = [Win32.Win32Utils]::GetConsoleWindow()
     if ($hwnd -ne [IntPtr]::Zero) {
-        # 0 = SW_HIDE (masque complètement la fenêtre)
-        $type::ShowWindow($hwnd, 0)
+        # 0 = SW_HIDE
+        [Win32.Win32Utils]::ShowWindow($hwnd, 0) | Out-Null
     }
 } catch {}
 
