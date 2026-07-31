@@ -696,18 +696,16 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
     temp_dir = os.environ.get("TEMP", "")
     local_temp = os.path.join(local_appdata, "Temp")
 
-    # ── Dossiers prioritaires ciblés (scan rapide et précis)
+    # ── Dossiers prioritaires CHIRURGICAUX (scan rapide et précis, pas de gros dossiers génériques)
     standard_dirs = [
-        # FiveM : scan ciblé plugins / crashes / nui (évite les Go de cache assets de FiveM)
+        # FiveM : plugins et scripts NUI uniquement
         os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "nui"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
 
-        # Utilisateur
+        # Bureau et Téléchargements (source principale de cheats)
         os.path.join(user_profile, "Desktop"),
         os.path.join(user_profile, "Downloads"),
-        os.path.join(user_profile, "Documents"),
-        os.path.join(user_profile, "Videos"),
         # Temp
         temp_dir,
         local_temp,
@@ -757,17 +755,17 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
     def _get_depth_limit(directory: str) -> int:
         d_lower = directory.lower()
-        if "fivem.app" in d_lower:
+        if "fivem.app" in d_lower or "cfx.re" in d_lower:
             return 2
         if "recent" in d_lower:
             return 1
         if "$recycle.bin" in d_lower:
             return 1
-        if "localappdata" in d_lower or "local\\temp" in d_lower:
-            return 3
-        if "roaming" in d_lower:
-            return 3
-        return 4   # Défaut général
+        if "desktop" in d_lower or "downloads" in d_lower:
+            return 2   # Bureau/Téléchargements : pas besoin d'aller trop profond
+        if "temp" in d_lower:
+            return 2
+        return 2   # Défaut : limité à 2 niveaux pour la vitesse
 
     import threading
     _lock = threading.Lock()
@@ -811,9 +809,13 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     if d.lower() not in {
                         "windows", "program files", "program files (x86)",
                         "system32", "syswow64", "ea", "playnite", "razor",
-                        "system volume information", "programdata",
+                        "system volume information", "programdata", "programdata",
                         "recovery", "perflogs", "winsxs", "servicing",
-                        "node_modules", ".git", ".cache", "gpu_cache"
+                        "node_modules", ".git", ".cache", "gpu_cache",
+                        "microsoft", "windows", "nvidia", "amd", "intel",
+                        "common files", "internet explorer", "windows defender",
+                        "windowsapps", "onedrive", "packages", "publisher",
+                        "application data", "cookies", "history", "temporary internet files"
                     } and not d.lower().startswith(IGNORED_DIR_PREFIXES)
                 ]
 
@@ -1249,22 +1251,6 @@ def process_single(pinfo):
     except Exception:
         return None
 
-def kill_fivem_if_running():
-    """Ferme FiveM proprement avant le scan pour libérer les fichiers disk lockés."""
-    FIVEM_PROCS = {"fivem.exe", "fivem_b2802_dump.exe", "gta5.exe", "gta_sa.exe"}
-    killed = []
-    for proc in psutil.process_iter(['pid', 'name']):
-        try:
-            name = (proc.info.get('name') or '').lower()
-            if name in FIVEM_PROCS:
-                proc.terminate()
-                killed.append(name)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-    if killed:
-        time.sleep(1.5)  # Laisser le temps aux fichiers d'être libérés
-    return killed
-
 
 def run_system_scan(progress_callback=None):
 
@@ -1283,22 +1269,17 @@ def run_system_scan(progress_callback=None):
     step("Détection Disques", 12, f"{len(mounted_drives)} disque(s) : {drive_labels}")
 
     # ── 12-25% : Phases indépendantes en PARALLÈLE
-    # Lance simultanément : Infos système, Install OS, Vitesse Disque, FiveM Kill
+    # Lance simultanément : Infos système, Install OS, Vitesse Disque
     step("Initialisation Parallèle", 13, f"Lancement des collectes sur {_CPU_CORES} cœurs...")
 
-    with ThreadPoolExecutor(max_workers=4) as _init_ex:
+    with ThreadPoolExecutor(max_workers=3) as _init_ex:
         _f_ext   = _init_ex.submit(get_extended_system_info)
         _f_os    = _init_ex.submit(get_os_installation_date)
         _f_disk  = _init_ex.submit(measure_disk_read_speed)
-        _f_kill  = _init_ex.submit(kill_fivem_if_running)
 
     ext_info   = _f_ext.result()
     os_install = _f_os.result()
     disk_speed = _f_disk.result()
-    killed_procs = _f_kill.result()
-
-    if killed_procs:
-        step("FiveM Fermé", 18, f"FiveM fermé avant scan : {', '.join(killed_procs)}")
 
     step("Infos Système", 20, f"CPU/GPU/OS collecté | Disque : {disk_speed} MB/s")
 
