@@ -1,5 +1,5 @@
 {
-  "version": "1.8",
-  "changelog": "v1.8: Scan Fichiers Recents (LNK), Corbeille ($RECYCLE.BIN), Racine Profil, LocalAppData\\Temp, Noms Dossiers Suspects (420/ham/hack/...), FiveM.app vitesse x3",
+  "version": "1.9",
+  "changelog": "v1.9: Traçabilité des exécutables lancés depuis clés USB/SSD externes débranchés (Prefetch Volume Origin) + Fix scoring USB",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
