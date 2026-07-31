@@ -800,10 +800,16 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     dirs.clear()
                     continue
 
+                # Compteur pour rafraîchir le callback en temps réel sans ralentir la boucle
+                file_count = 0
                 for file in files:
+                    file_count += 1
                     full_path = os.path.join(root, file)
                     file_lower = file.lower()
                     ext = os.path.splitext(file_lower)[1]
+
+                    if progress_callback and file_count % 30 == 0:
+                        progress_callback("Scan Fichiers", pct, f"{file}")
 
                     # ── Fichiers Recent (.lnk) : extraire la cible du raccourci
                     if is_recent_dir and ext == ".lnk":

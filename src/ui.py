@@ -54,14 +54,21 @@ def render_progress(stage, percent, extra_info=""):
     else:
         color = _YELLOW
 
-    info_display = extra_info[:42] if extra_info else ""
+    # Si un chemin long est passé, garder les 55 derniers caractères pour voir le nom de fichier / sous-dossier actuel
+    if extra_info:
+        if len(extra_info) > 55:
+            info_display = "..." + extra_info[-52:]
+        else:
+            info_display = extra_info
+    else:
+        info_display = ""
 
     line = (
         f"\r{color}{spinner}{_RESET} "
         f"{color}[{bar}]{_RESET} "
         f"{_BOLD}{percent:3d}%{_RESET}  "
-        f"{_DIM}{stage:<22}{_RESET}  "
-        f"\033[37m{info_display:<44}{_RESET}"
+        f"{_DIM}{stage:<20}{_RESET}  "
+        f"\033[37m{info_display:<55}{_RESET}"
     )
 
     sys.stdout.write(line)
