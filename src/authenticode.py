@@ -50,6 +50,8 @@ def check_authenticode_signature(filepath):
             encoding='utf-8',
             errors='replace',
             timeout=1.5
+        ,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         output = result.stdout.strip()
         if "|" in output:

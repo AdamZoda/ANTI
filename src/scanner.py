@@ -146,6 +146,8 @@ def scan_usn_journal_drive(drive_letter):
         res = subprocess.run(
             ["fsutil", "usn", "queryjournal", f"{drive_letter}"],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+        ,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if res.returncode != 0:
             return deleted_cheats
@@ -167,7 +169,8 @@ def scan_usn_journal_drive(drive_letter):
         
         read_res = subprocess.run(
             ["fsutil", "usn", "readjournal", f"{drive_letter}", f"startusn={hex(start_usn)}", "csv"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if read_res.returncode != 0:
             return deleted_cheats
@@ -473,6 +476,8 @@ def get_os_installation_date():
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+        ,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         date_str = res.stdout.strip()
         if date_str and "error" not in date_str.lower():
@@ -649,6 +654,8 @@ def scan_windows_defender_threats(progress_callback=None, pct=74):
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5
+        ,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if res.returncode == 0 and res.stdout.strip():
             import json
@@ -922,6 +929,8 @@ def get_hardware_id():
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+        ,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         uuid_str = res.stdout.strip()
         if uuid_str and len(uuid_str) > 10 and "error" not in uuid_str.lower():
@@ -1359,7 +1368,8 @@ def get_extended_system_info():
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
              "(Get-CimInstance Win32_OperatingSystem).Caption"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         info["os_version"] = res.stdout.strip() or "Windows"
     except Exception:
@@ -1369,7 +1379,8 @@ def get_extended_system_info():
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
              "(Get-CimInstance Win32_VideoController).Name | Select -First 1"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         info["gpu"] = res.stdout.strip() or "N/A"
     except Exception:
@@ -1379,7 +1390,8 @@ def get_extended_system_info():
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
              "(Get-CimInstance Win32_Processor).Name | Select -First 1"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         info["cpu_name"] = res.stdout.strip() or "N/A"
     except Exception:
