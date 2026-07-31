@@ -168,7 +168,7 @@ def send_to_discord(scan_id, scan_data, verdict):
             {"name": "🖥️ OS", "value": f"`{si.get('os_version', 'N/A')}`", "inline": False},
             {"name": "⚠️ Apps Suspectes (top 5)", "value": flagged_str, "inline": False},
         ],
-        "footer": {"text": f"ANTI Defense System v1.9 | {scan_data.get('timestamp', '')}"}
+        "footer": {"text": f"ANTI Defense System v2.5 | {scan_data.get('timestamp', '')}"}
     }
 
     # Création du payload contenant l'embed ET les champs mappés à plat pour les scripts automatiques

