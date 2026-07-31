@@ -13,6 +13,15 @@ CURRENT_VERSION = "2.0"
 def main():
     print_banner()
 
+    # Récupérer le chemin du répertoire temporaire
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(".")
+
+    # Charger le fichier de configuration
+    config_path = os.path.join(base_path, "config.json")
+
     # 1. Récupérer le prochain scan_id depuis Supabase
     scan_id = get_next_scan_id_from_supabase()
 
@@ -35,10 +44,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-if hasattr(sys, '_MEIPASS'):
-    base_path = sys._MEIPASS
-else:
-    base_path = os.path.abspath(".")
-
-config_path = os.path.join(base_path, "config.json")
