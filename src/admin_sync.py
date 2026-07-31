@@ -197,14 +197,20 @@ def send_to_discord(scan_id, scan_data, verdict):
 # VÉRIFICATION DE MISE À JOUR
 # ─────────────────────────────────────────────
 def check_for_updates(current_version):
-    """Vérifie si une nouvelle version est disponible sur GitHub."""
+    """Vérifie si une nouvelle version est disponible sur le dépôt exedownloader."""
     try:
-        url = "https://raw.githubusercontent.com/AdamZoda/ANTI/main/version.json"
+        url = "https://raw.githubusercontent.com/AdamZoda/exedownloader/main/version.json"
         req = urllib.request.Request(url, headers={"User-Agent": "ANTI-Defense-Scanner/1.0"})
-        with urllib.request.urlopen(req, timeout=4) as response:
+        # Ignorer la vérification SSL si problème de certificat local
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
             data = json.loads(response.read().decode("utf-8"))
             latest = data.get("version", current_version)
-            download_url = data.get("download_url", "https://github.com/AdamZoda/ANTI/releases")
+            download_url = data.get("download_url", "https://raw.githubusercontent.com/AdamZoda/exedownloader/main/anti-scan.exe")
             if float(latest) > float(current_version):
                 return True, latest, download_url
     except Exception:

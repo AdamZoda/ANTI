@@ -1,7 +1,4 @@
 {
-  "version": "2.6",
-  "changelog": "v2.6: Loader console ultra-fluide avec effacement ANSI sans saut de ligne, exclusion des fichiers inoffensifs (.pdf, .txt, etc.) et ciblage optimisé FiveM",
-  "download_url": "https://github.com/AdamZoda/ANTI/releases"
+  "version": "2.7",
+  "download_url": "https://raw.githubusercontent.com/AdamZoda/exedownloader/main/anti-scan.exe"
 }
-
-
