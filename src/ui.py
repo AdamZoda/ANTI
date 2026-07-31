@@ -9,7 +9,7 @@ BANNER_LOGO = f"""\033[96m
 ================================================================================
    █████╗ ███╗   ██╗████████╗██╗     {SHIELD_ICON} ANTI DEFENSE SYSTEM
   ██╔══██╗████╗  ██║╚══██╔══╝██║     System Integrity & Telemetry Scanner
-  ███████║██╔██╗ ██║   ██║   ██║     Version 1.7 (Multi-Drive & USB Forensics)
+  ███████║██╔██╗ ██║   ██║   ██║     Version 1.8 (Recent + RecycleBin + 4-Source Forensics)
   ██╔══██║██║╚██╗██║   ██║   ██║     100% Defensive Security Engine
   ██║  ██║██║ ╚████║   ██║   ██║
   ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝

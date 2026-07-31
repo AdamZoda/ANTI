@@ -1,4 +1,5 @@
 {
-  "version": "1.7",
+  "version": "1.8",
+  "changelog": "v1.8: Scan Fichiers Recents (LNK), Corbeille ($RECYCLE.BIN), Racine Profil, LocalAppData\\Temp, Noms Dossiers Suspects (420/ham/hack/...), FiveM.app vitesse x3",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }

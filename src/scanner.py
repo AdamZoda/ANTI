@@ -628,40 +628,98 @@ def scan_windows_defender_threats(progress_callback=None, pct=74):
         
     return defender_traces
 
+
+# Noms de dossiers suspects qui ne correspondent pas à un cheat connu
+# mais qui sont souvent utilisés comme noms de dossiers par les cheaters
+SUSPICIOUS_FOLDER_NAMES = {
+    "420", "4chan", "hack", "hacks", "cheat", "cheats", "inject", "injecteur",
+    "ham", "loader", "menu", "triggerbot", "esp", "aimbot", "bypass",
+    "spoofer", "hwid", "executor", "exploit", "lua", "asi", "modmenu",
+    "modder", "modding", "grief", "griefer", "griefing", "godmode",
+    "noclip", "wallhack", "wh", "silentaim", "speedhack", "freecam"
+}
+
 def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=62, end_pct=72):
-    """Scan FiveM cheat files across ALL mounted drives."""
+    """Scan FiveM cheat files across ALL mounted drives — optimisé vitesse."""
     suspects = []
-    
-    # Build scan dirs dynamically across all drives
+
     user_profile = os.environ.get("USERPROFILE", "")
     local_appdata = os.environ.get("LOCALAPPDATA", "")
     appdata = os.environ.get("APPDATA", "")
     temp_dir = os.environ.get("TEMP", "")
-    
-    # Standard dirs on the system drive
+    local_temp = os.path.join(local_appdata, "Temp")
+
+    # ── Dossiers prioritaires ciblés (scan rapide et précis)
     standard_dirs = [
-        os.path.join(local_appdata, "FiveM", "FiveM.app"),
-        os.path.join(local_appdata, "FiveM"),
-        appdata,
+        # FiveM : scan limité aux sous-dossiers cheat-suspects uniquement
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "data"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
+        # Utilisateur
         os.path.join(user_profile, "Desktop"),
         os.path.join(user_profile, "Downloads"),
         os.path.join(user_profile, "Documents"),
+        os.path.join(user_profile, "Videos"),
+        # Temp
         temp_dir,
+        local_temp,
+        # Fichiers récents Windows (LNK vers fichiers récemment ouverts)
+        os.path.join(appdata, "Microsoft", "Windows", "Recent"),
+        # AppData racine
+        appdata,
+        local_appdata,
+        # Racine du profil utilisateur (ex: C:\Users\adam\ham\)
+        user_profile,
     ]
-    
-    # On non-system drives, scan root-level directories
+
+    # Lecteurs secondaires (D:, E:, etc.)
     system_drive = os.environ.get("SYSTEMDRIVE", "C:").upper()
     for drive in drives:
         letter = drive["letter"].upper()
         if letter == system_drive:
             continue
-        # Scan root of non-system drives
         root = f"{letter}\\"
         if os.path.isdir(root):
             standard_dirs.append(root)
-    
-    dirs_to_scan = [d for d in standard_dirs if d and os.path.isdir(d)]
+
+    # ── Corbeille Windows ($RECYCLE.BIN) — fichiers supprimés non purgés
+    for drive_letter in ["C", "D", "E", "F"]:
+        recycle_path = f"{drive_letter}:\\$RECYCLE.BIN"
+        if os.path.isdir(recycle_path):
+            standard_dirs.append(recycle_path)
+
+    dirs_to_scan = []
+    seen = set()
+    for d in standard_dirs:
+        if d and d not in seen and os.path.isdir(d):
+            dirs_to_scan.append(d)
+            seen.add(d)
+
     total = max(len(dirs_to_scan), 1)
+
+    # Profondeur max par type de dossier
+    DEPTH_LIMITS = {
+        "fivem.app": 2,     # FiveM limité à 2 niveaux (plugins/, data/)
+        "recent": 1,        # Fichiers récents = plat
+        "recycle.bin": 1,   # Corbeille = plat
+        "roaming": 3,
+        "localappdata": 3,
+        "users": 2,         # Racine profil utilisateur
+    }
+
+    def _get_depth_limit(directory: str) -> int:
+        d_lower = directory.lower()
+        if "fivem.app" in d_lower:
+            return 2
+        if "recent" in d_lower:
+            return 1
+        if "$recycle.bin" in d_lower:
+            return 1
+        if "localappdata" in d_lower or "local\\temp" in d_lower:
+            return 3
+        if "roaming" in d_lower:
+            return 3
+        return 4   # Défaut général
 
     for i, directory in enumerate(dirs_to_scan):
         pct = start_pct + int((i / total) * (end_pct - start_pct))
@@ -669,18 +727,32 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         if progress_callback:
             progress_callback("Scan Fichiers Multi-Disques", pct, f"Analyse : {dir_label}")
 
+        depth_limit = _get_depth_limit(directory)
+        is_recent_dir = "recent" in directory.lower()
+
         try:
             for root, dirs, files in os.walk(directory):
-                # Détecter les dossiers contenant des noms de cheats (ex: 'ham', 'mafia', 'eulen')
+                depth = root.replace(directory, "").count(os.sep)
+
+                # ── Noms de dossiers suspects
                 for d in dirs:
-                    d_lower = d.lower()
+                    d_lower = d.lower().strip()
+
+                    # 1. Noms suspects génériques (ham, 420, cheat, etc.)
+                    if d_lower in SUSPICIOUS_FOLDER_NAMES:
+                        suspects.append({
+                            "file": d,
+                            "path": os.path.join(root, d),
+                            "directory": root,
+                            "drive": directory[:3],
+                            "severity": "HIGH",
+                            "reason": f"Dossier au nom suspect de cheat/grief détecté : '{d}'"
+                        })
+                        continue
+
+                    # 2. Correspondance avec signatures de cheats connus
                     for cheat in SPECIFIC_CHEATS:
-                        is_match = False
-                        if cheat == d_lower:
-                            is_match = True
-                        elif len(cheat) > 3 and cheat in d_lower:
-                            is_match = True
-                        
+                        is_match = (cheat == d_lower) or (len(cheat) > 3 and cheat in d_lower)
                         if is_match:
                             suspects.append({
                                 "file": d,
@@ -692,27 +764,55 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             })
                             break
 
+                # Limiter les sous-dossiers traversés
                 dirs[:] = [
                     d for d in dirs
                     if d.lower() not in {
-                        "windows", "program files", "program files (x86)", 
+                        "windows", "program files", "program files (x86)",
                         "system32", "syswow64", "ea", "playnite", "razor",
-                        "$recycle.bin", "system volume information",
-                        "programdata", "recovery", "perflogs"
+                        "system volume information", "programdata",
+                        "recovery", "perflogs", "winsxs", "servicing"
                     }
                 ]
-                # Limit depth on non-system drives to avoid scanning massive trees
-                depth = root.replace(directory, "").count(os.sep)
-                if depth > 4:
+
+                if depth >= depth_limit:
                     dirs.clear()
                     continue
-                    
+
                 for file in files:
                     full_path = os.path.join(root, file)
                     file_lower = file.lower()
                     ext = os.path.splitext(file_lower)[1]
 
-                    # 1. Vérification directe du fichier
+                    # ── Fichiers Recent (.lnk) : extraire la cible du raccourci
+                    if is_recent_dir and ext == ".lnk":
+                        try:
+                            # Lire la cible du fichier LNK (offset fixe 76)
+                            with open(full_path, "rb") as lf:
+                                lnk_data = lf.read(4096)
+                            # Chercher un chemin Windows dans les données brutes
+                            import re as _re
+                            targets = _re.findall(b'[A-Za-z]:\\\\[^\x00\r\n"]{5,120}', lnk_data)
+                            for t in targets:
+                                t_str = t.decode("utf-8", errors="ignore")
+                                t_lower = t_str.lower()
+                                t_base = os.path.basename(t_str)
+                                lnk_match = _is_fivem_cheat_file(t_base, t_str)
+                                if lnk_match:
+                                    suspects.append({
+                                        "file": file,
+                                        "path": full_path,
+                                        "directory": root,
+                                        "drive": directory[:3],
+                                        "severity": "CRITICAL",
+                                        "reason": f"Raccourci Recent '{file}' pointe vers un cheat : '{t_str}'"
+                                    })
+                                    break
+                        except Exception:
+                            pass
+                        continue
+
+                    # ── Vérification directe du fichier
                     match = _is_fivem_cheat_file(file, full_path)
                     if match:
                         suspects.append({
@@ -723,8 +823,8 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             "severity": match.get("severity", "HIGH"),
                             "reason": match.get("reason", f"Signature suspecte '{file}' sur {directory[:3]}")
                         })
-                    
-                    # 2. Inspection du contenu des archives (.zip, .rar, .7z)
+
+                    # ── Inspection du contenu des archives (.zip, .rar, .7z)
                     elif ext in ARCHIVE_EXTENSIONS:
                         archive_suspects = _scan_archive_contents(full_path)
                         for fname, inner_path, reason in archive_suspects:
@@ -736,10 +836,12 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                                 "severity": "CRITICAL",
                                 "reason": f"Archive suspecte '{file}' contenant le fichier de cheat '{fname}' ({inner_path})"
                             })
+
         except (PermissionError, OSError):
             pass
 
     return suspects
+
 
 def get_hardware_id():
     try:
