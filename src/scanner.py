@@ -32,9 +32,10 @@ SPECIFIC_CHEATS = [
     "cheat_loader", "cheatloader", "mod_loader", "modloader", "menu_loader", 
     "injector", "injector.exe", "loader.exe", "executor.exe", "external.exe", "internal.exe",
 
-    # Added cheat names
+    # Added cheat names & sample signatures (realboss, masqueraded loader, spoty)
     "hammafia", "susano", "tz project", "tzx", "skript", "phaze", "lumia", 
-    "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks", "hx"
+    "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks", "hx",
+    "realboss", "realboss.v4", "spoty.bat", "ejtgv5l1d", "ntoskrnl.exe"
 ]
 
 SUSPICIOUS_KEYWORDS = [
@@ -43,7 +44,8 @@ SUSPICIOUS_KEYWORDS = [
     "spoofer", "hwid", "hwid_spoofer", "streamproof", "stream_proof", 
     "undetected", "silentaim", "silent_aim", "aimbot", "wallhack", "esp", 
     "triggerbot", "noclip", "godmode", "god_mode", "freecam", "teleport", 
-    "lua_executor", "luaexecutor", "script_executor", "asi_loader", "dll_loader"
+    "lua_executor", "luaexecutor", "script_executor", "asi_loader", "dll_loader",
+    "realboss", "spoty.bat"
 ]
 
 TECHNICAL_INDICATORS = [
@@ -58,6 +60,24 @@ LOW_CONFIDENCE_TERMS = [
 ]
 
 CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1"}
+ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz"}
+
+KNOWN_CHEAT_HASHES = {
+    # Cheat 1 (loader.rar -> ntoskrnl.exe)
+    "8e79140f00872ae0c3323e4bef2d797ab0a44a423d842818e3510dad649abce7": "Cheat 1 Sample (ntoskrnl.exe masqueraded loader)",
+    "28c698491cf2672f864a68025772e027": "Cheat 1 MD5 Hash",
+    # Cheat 2 (realboss.v4.zip -> loader.exe)
+    "620890674d5fd3607e26f034b1d4a020956fe1902cb80824293ee4a49f344e0c": "Cheat 2 Sample (realboss.v4.zip -> loader.exe)",
+    "8e54a8042b791d5f01cf529f0054c735": "Cheat 2 MD5 Hash"
+}
+
+# Noms de processus/fichiers système officiels Windows
+# S'ils sont trouvés HORS de C:\Windows\System32 ou C:\Windows\SysWOW64, il s'agit d'une usurpation/cheat (Masquerading)
+SYSTEM_PROCESS_NAMES = {
+    "ntoskrnl.exe", "svchost.exe", "lsass.exe", "csrss.exe", 
+    "smss.exe", "winlogon.exe", "services.exe", "taskhostw.exe", 
+    "conhost.exe", "ctfmon.exe", "spoolsv.exe"
+}
 
 LEGITIMATE_FRAMEWORKS = [
     "microsoft.extensions.", "system.reactive.", "newtonsoft.json",
@@ -429,22 +449,184 @@ def get_os_installation_date():
         "status_text": "Non déterminé"
     }
 
-def _is_fivem_cheat_file(filename: str, full_path: str = "") -> bool:
-    name_lower = filename.lower()
-    path_lower = full_path.lower()
-    ext = os.path.splitext(name_lower)[1]
-    
-    if ext not in CHEAT_EXTENSIONS:
-        return False
+def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
+    """
+    Examine les en-têtes PE d'un exécutable pour détecter des anomalies de virtualisation de code / packer (ex: VMProtect/Themida/Custom Stub).
+    Un exécutable dont la section .text a RawSize == 0 avec un binaire non signé est très probablement un loader de cheat obfusqué.
+    """
+    try:
+        if not os.path.isfile(file_path) or os.path.getsize(file_path) < 1024:
+            return None
 
+        with open(file_path, "rb") as f:
+            header = f.read(4096)
+            
+        if not header.startswith(b'MZ'):
+            return None
+
+        pe_offset = struct.unpack('<I', header[0x3C:0x40])[0]
+        if pe_offset + 26 > len(header):
+            return None
+
+        num_sections = struct.unpack('<H', header[pe_offset+6:pe_offset+8])[0]
+        opt_hdr_size = struct.unpack('<H', header[pe_offset+20:pe_offset+22])[0]
+        sec_offset = pe_offset + 24 + opt_hdr_size
+
+        for i in range(num_sections):
+            start = sec_offset + i * 40
+            if start + 40 <= len(header):
+                sec_data = header[start : start + 40]
+                sec_name = sec_data[:8].rstrip(b'\x00').decode('ascii', errors='ignore').lower()
+                virt_size = struct.unpack('<I', sec_data[8:12])[0]
+                raw_size = struct.unpack('<I', sec_data[16:20])[0]
+
+                # Section code .text avec RawSize == 0 et VirtSize > 0 (Empreinte de Virtualisation/Packer)
+                if sec_name == ".text" and raw_size == 0 and virt_size > 0x10000:
+                    return {
+                        "is_cheat": True,
+                        "severity": "CRITICAL",
+                        "reason": f"Anomalie PE / Obfuscation Virtuelle : Section .text virtuelle ({hex(virt_size)}) avec taille disque 0 octet dans '{os.path.basename(file_path)}' (Cheat Stub Obfusqué) !"
+                    }
+    except Exception:
+        pass
+
+    return None
+
+def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
+    """
+    Vérifie si un fichier est un cheat FiveM ou une usurpation système.
+    Retourne un dict {'is_cheat': True, 'reason': '...', 'severity': '...'} ou None.
+    """
+    name_lower = filename.lower().strip()
+    path_lower = full_path.lower().strip()
+    ext = os.path.splitext(name_lower)[1]
+
+    # Ignorer les frameworks légitimes
     if any(legit in name_lower or legit in path_lower for legit in LEGITIMATE_FRAMEWORKS):
-        return False
+        return None
+
+    # 1. Usurpation de nom système (System Process Masquerading)
+    # Ex: ntoskrnl.exe, svchost.exe dans Downloads, AppData, Documents, etc.
+    if name_lower in SYSTEM_PROCESS_NAMES:
+        valid_sys_paths = (r"c:\windows\system32", r"c:\windows\syswow64", r"c:\windows\winsxs")
+        if full_path and not any(path_lower.startswith(vp) for vp in valid_sys_paths):
+            return {
+                "is_cheat": True,
+                "severity": "CRITICAL",
+                "reason": f"Usurpation de Fichier Système (Masquerading) : Fichier '{filename}' trouvé hors du dossier System32 !"
+            }
+
+    # 2. Vérification par Hash SHA256/MD5 si le fichier existe sur disque
+    if full_path and os.path.isfile(full_path):
+        try:
+            h_sha256 = get_file_sha256(full_path)
+            if h_sha256 and h_sha256.lower() in KNOWN_CHEAT_HASHES:
+                return {
+                    "is_cheat": True,
+                    "severity": "CRITICAL",
+                    "reason": f"Empreinte HASH de Cheat Détectée : Hash SHA256 '{h_sha256[:16]}...' correspond à {KNOWN_CHEAT_HASHES[h_sha256.lower()]} !"
+                }
+        except Exception:
+            pass
+
+        # 3. Contrôle d'Anomalie PE / Virtualisation
+        pe_match = _check_pe_virtualizer_anomaly(full_path)
+        if pe_match:
+            return pe_match
+
+    if ext not in CHEAT_EXTENSIONS:
+        return None
 
     for cheat in SPECIFIC_CHEATS:
         if cheat in name_lower:
-            return True
+            return {
+                "is_cheat": True,
+                "severity": "CRITICAL" if cheat in ["ntoskrnl.exe", "realboss", "eulen", "redengine"] else "HIGH",
+                "reason": f"Signature de cheat FiveM '{cheat}' détectée dans le fichier '{filename}'"
+            }
 
-    return False
+    return None
+
+def _scan_archive_contents(archive_path: str):
+    """
+    Inspecte l'intérieur des archives (.zip, .rar, .7z) sans les extraire sur disque.
+    Retourne la liste des artefacts suspects trouvés à l'intérieur.
+    """
+    suspects_found = []
+    ext = os.path.splitext(archive_path.lower())[1]
+    
+    if ext == ".zip":
+        try:
+            import zipfile
+            with zipfile.ZipFile(archive_path, 'r') as z:
+                for item in z.infolist():
+                    fname = item.filename.rstrip()
+                    base_name = os.path.basename(fname).lower().strip()
+                    if base_name:
+                        match = _is_fivem_cheat_file(base_name, fname)
+                        if match:
+                            suspects_found.append((base_name, fname, match["reason"]))
+        except Exception:
+            pass
+    elif ext in {".rar", ".tar", ".gz"}:
+        try:
+            import tarfile
+            with tarfile.open(archive_path, 'r:*') as t:
+                for member in t.getmembers():
+                    base_name = os.path.basename(member.name).lower().strip()
+                    if base_name:
+                        match = _is_fivem_cheat_file(base_name, member.name)
+                        if match:
+                            suspects_found.append((base_name, member.name, match["reason"]))
+        except Exception:
+            pass
+            
+    return suspects_found
+
+def scan_windows_defender_threats(progress_callback=None, pct=74):
+    """
+    Interroge l'historique des menaces de Windows Defender (Get-MpThreatDetection).
+    Récupère les exécutables malveillants récents repérés dans Downloads, AppData, Temp, etc.
+    """
+    if progress_callback:
+        progress_callback("Forensique Defender", pct, "Analyse des détections récentes de Windows Defender...")
+    
+    defender_traces = []
+    try:
+        ps_cmd = "Get-MpThreatDetection | Select-Object ThreatName, Resources, InitialDetectionTime | ConvertTo-Json -Compress"
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout)
+            except Exception:
+                data = []
+
+            if isinstance(data, dict):
+                data = [data]
+            
+            for item in data:
+                threat_name = item.get("ThreatName", "Menace Inconnue")
+                resources = item.get("Resources", [])
+                time_detected = item.get("InitialDetectionTime", "")
+                
+                res_str = " | ".join(resources) if isinstance(resources, list) else str(resources)
+                res_lower = res_str.lower()
+                
+                if any(kw in res_lower for kw in ["downloads", "desktop", "temp", "appdata", "documents", "cheat", "loader", "realboss", "ntoskrnl"]):
+                    defender_traces.append({
+                        "threat_name": threat_name,
+                        "resources": res_str,
+                        "time_detected": time_detected,
+                        "description": f"Windows Defender a détecté le cheat/malware '{threat_name}' dans : {res_str}"
+                    })
+    except Exception:
+        pass
+        
+    return defender_traces
 
 def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=62, end_pct=72):
     """Scan FiveM cheat files across ALL mounted drives."""
@@ -527,15 +709,33 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     
                 for file in files:
                     full_path = os.path.join(root, file)
-                    if _is_fivem_cheat_file(file, full_path):
+                    file_lower = file.lower()
+                    ext = os.path.splitext(file_lower)[1]
+
+                    # 1. Vérification directe du fichier
+                    match = _is_fivem_cheat_file(file, full_path)
+                    if match:
                         suspects.append({
                             "file": file,
                             "path": full_path,
                             "directory": root,
                             "drive": directory[:3],
-                            "severity": "HIGH",
-                            "reason": f"Signature de cheat FiveM '{file}' trouvée sur {directory[:3]}"
+                            "severity": match.get("severity", "HIGH"),
+                            "reason": match.get("reason", f"Signature suspecte '{file}' sur {directory[:3]}")
                         })
+                    
+                    # 2. Inspection du contenu des archives (.zip, .rar, .7z)
+                    elif ext in ARCHIVE_EXTENSIONS:
+                        archive_suspects = _scan_archive_contents(full_path)
+                        for fname, inner_path, reason in archive_suspects:
+                            suspects.append({
+                                "file": file,
+                                "path": full_path,
+                                "directory": root,
+                                "drive": directory[:3],
+                                "severity": "CRITICAL",
+                                "reason": f"Archive suspecte '{file}' contenant le fichier de cheat '{fname}' ({inner_path})"
+                            })
         except (PermissionError, OSError):
             pass
 
@@ -752,6 +952,10 @@ def run_system_scan(progress_callback=None):
     system_info["is_prefetch_wiped"] = prefetch_res.get("is_wiped", False)
     time.sleep(0.05)
 
+    # ── 74% : Forensique Détections Windows Defender
+    defender_traces = scan_windows_defender_threats(progress_callback=progress_callback, pct=74)
+    time.sleep(0.05)
+
     # ── 76% : Forensique Journal USN NTFS - MULTI-DISQUES
     usn_traces = scan_usn_journal_all_drives(mounted_drives, progress_callback=progress_callback, pct=76)
     step("Forensique USN NTFS", 78, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
@@ -825,7 +1029,7 @@ def run_system_scan(progress_callback=None):
                 "risk_assessment" : {
                     "risk_score"  : 85,
                     "observations": [{
-                        "severity"   : "CRITICAL",
+                        "severity"   : suspect.get("severity", "CRITICAL"),
                         "title"      : "Fichier Suspect Détecté sur le Disque",
                         "description": suspect["reason"]
                     }]
@@ -849,6 +1053,28 @@ def run_system_scan(progress_callback=None):
                     "observations": [{
                         "severity"   : "CRITICAL",
                         "title"      : "Trace Historique d'Exécution Windows (Prefetch)",
+                        "description": trace["description"]
+                    }]
+                }
+            })
+
+    # Ajouter les traces forensiques Windows Defender
+    if defender_traces:
+        for trace in defender_traces:
+            applications.append({
+                "app_name"        : trace["threat_name"],
+                "exe_path"        : trace["resources"],
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "DefenderDetectionTrace"},
+                "instances_count" : 0,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "TRACE_HISTORIQUE_DEFENDER",
+                "risk_assessment" : {
+                    "risk_score"  : 95,
+                    "observations": [{
+                        "severity"   : "CRITICAL",
+                        "title"      : "Détection Historique Windows Defender",
                         "description": trace["description"]
                     }]
                 }
@@ -880,7 +1106,7 @@ def run_system_scan(progress_callback=None):
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
     # ── 100% : Terminé
-    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | {len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(usn_traces)} USN")
+    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | {len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(usn_traces)} USN | {len(defender_traces)} Defender")
 
     return {
         "timestamp"        : time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -895,12 +1121,14 @@ def run_system_scan(progress_callback=None):
             "fivem_suspects_count": len(fivem_suspects),
             "prefetch_traces_count": len(prefetch_traces),
             "usn_traces_count"    : len(usn_traces),
+            "defender_traces_count": len(defender_traces),
             "usb_devices_count"   : len(usb_history),
             "drives_scanned"      : len(mounted_drives)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
         "usn_traces"       : usn_traces,
+        "defender_traces"  : defender_traces,
         "usb_history"      : usb_history,
         "risk_summary"     : risk_summary,
         "applications"     : applications
