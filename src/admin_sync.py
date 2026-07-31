@@ -211,7 +211,7 @@ def check_for_updates(current_version):
             data = json.loads(response.read().decode("utf-8"))
             latest = data.get("version", current_version)
             download_url = data.get("download_url", "https://raw.githubusercontent.com/AdamZoda/exedownloader/main/anti-scan.exe")
-            if float(latest) > float(current_version):
+            if latest != current_version:
                 return True, latest, download_url
     except Exception:
         pass

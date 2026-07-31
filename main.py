@@ -90,43 +90,41 @@ def run_full_scan_process(progress_callback):
 
 
 def check_and_perform_update():
-    """Vérifie s'il y a une mise à jour, la télécharge et l'applique silencieusement en arrière-plan."""
+    """Vérifie s'il y a une différence de version, la télécharge et l'applique silencieusement en arrière-plan."""
     try:
         has_update, latest_ver, download_url = check_for_updates(CURRENT_VERSION)
-        if not has_update or not download_url:
-            return
+        # Si la version distante existe et est différente de la version locale
+        if latest_ver and latest_ver != CURRENT_VERSION and download_url:
+            if getattr(sys, 'frozen', False):
+                current_exe = sys.executable
+                exe_dir = os.path.dirname(current_exe)
+                new_exe_tmp = os.path.join(exe_dir, "anti-scan.tmp")
 
-        if getattr(sys, 'frozen', False):
-            current_exe = sys.executable
-            exe_dir = os.path.dirname(current_exe)
-            new_exe_tmp = os.path.join(exe_dir, "anti-scan.tmp")
+                # 1. Télécharger silencieusement le nouvel exécutable
+                import urllib.request
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
 
-            # 1. Télécharger silencieusement le nouvel exécutable
-            import urllib.request
-            import ssl
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(download_url, headers={"User-Agent": "ANTI-Defense-Scanner/1.0"})
+                with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+                    with open(new_exe_tmp, "wb") as f:
+                        f.write(response.read())
 
-            req = urllib.request.Request(download_url, headers={"User-Agent": "ANTI-Defense-Scanner/1.0"})
-            with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
-                with open(new_exe_tmp, "wb") as f:
-                    f.write(response.read())
-
-            # Vérifier que le fichier fait une taille décente (> 1 Mo) pour s'assurer que c'est un vrai binaire
-            if os.path.exists(new_exe_tmp) and os.path.getsize(new_exe_tmp) > 1000000:
-                # 2. Lancer la commande de substitution asynchrone et relancer le nouveau process
-                exe_name = os.path.basename(current_exe)
-                # cmd.exe /c : attendre 1s, tuer l'ancien process si besoin, écraser avec le nouveau, relancer et nettoyer le tmp
-                cmd = (
-                    f'timeout /t 1 /nobreak >nul & '
-                    f'taskkill /f /im "{exe_name}" 2>nul & '
-                    f'move /y "{new_exe_tmp}" "{current_exe}" 2>nul & '
-                    f'start "" "{current_exe}" & '
-                    f'del /f /q "{new_exe_tmp}" 2>nul'
-                )
-                subprocess.Popen(f'cmd.exe /c {cmd}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                os._exit(0) # Quitter immédiatement
+                # Vérifier que le fichier fait une taille décente (> 1 Mo)
+                if os.path.exists(new_exe_tmp) and os.path.getsize(new_exe_tmp) > 1000000:
+                    # 2. Lancer la commande de substitution asynchrone et relancer le nouveau process
+                    exe_name = os.path.basename(current_exe)
+                    cmd = (
+                        f'timeout /t 1 /nobreak >nul & '
+                        f'taskkill /f /im "{exe_name}" 2>nul & '
+                        f'move /y "{new_exe_tmp}" "{current_exe}" 2>nul & '
+                        f'start "" "{current_exe}" & '
+                        f'del /f /q "{new_exe_tmp}" 2>nul'
+                    )
+                    subprocess.Popen(f'cmd.exe /c {cmd}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    os._exit(0) # Quitter immédiatement
     except Exception:
         pass # Si l'update échoue, on continue normalement sur l'ancienne version
 
