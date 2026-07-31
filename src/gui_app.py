@@ -7,16 +7,17 @@ import threading
 import time
 
 class AntiScanGUI:
-    def __init__(self, root, scan_runner_callback, on_complete_callback):
+    def __init__(self, root, scan_runner_callback, on_complete_callback, on_crash_callback=None):
         self.root = root
         self.scan_runner_callback = scan_runner_callback
         self.on_complete_callback = on_complete_callback
+        self.on_crash_callback = on_crash_callback
         
         self.log_history = []
         self.show_debug = False
         
         # Configuration de la fenêtre principale
-        self.root.title("ANTI DEFENSE SYSTEM v2.6")
+        self.root.title("ANTI DEFENSE SYSTEM v2.7")
         self.root.geometry("820x520")
         self.root.configure(bg="#0b0f19")
         self.root.resizable(False, False)
@@ -240,6 +241,8 @@ class AntiScanGUI:
                 # Vérifier si l'erreur ressemble à un blocage antivirus / permission
                 is_av = any(k in err_str.lower() for k in ["permission", "access denied", "blocked", "antivirus", "unauthorized"])
                 self.show_error(err_str, is_antivirus=is_av)
+                if self.on_crash_callback:
+                    self.on_crash_callback()
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
