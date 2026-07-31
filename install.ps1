@@ -44,7 +44,7 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Invoke-WebRequest -Uri "$REPO_URL/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
 } catch {
     Write-Host "[X] Impossible de démarrer le scanner." -ForegroundColor Red
     exit 1
