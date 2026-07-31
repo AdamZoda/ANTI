@@ -7,7 +7,6 @@ $ErrorActionPreference = "SilentlyContinue"
 Remove-Item -Path "$env:LOCALAPPDATA\AntiScan" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$env:TEMP\AntiScan*"        -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$env:TEMP\ANTI.exe"         -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$env:TEMP\anti-scan.exe"    -Recurse -Force -ErrorAction SilentlyContinue
 Clear-Host
 
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
@@ -18,11 +17,9 @@ $exePath    = "$installDir\ANTI.exe"
 
 $CLEANUP_TARGETS = @(
     "$env:TEMP\ANTI.exe",
-    "$env:TEMP\anti-scan.exe",
     "$env:TEMP\AntiScan*",
     "$env:LOCALAPPDATA\AntiScan*",
     "$env:APPDATA\AntiScan*",
-    "$env:USERPROFILE\Downloads\anti-scan*.exe",
     "$env:USERPROFILE\Downloads\ANTI*.exe"
 )
 

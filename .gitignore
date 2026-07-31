@@ -9,7 +9,7 @@ venv/
 build/
 *.spec
 dist/*
-!dist/anti-scan.exe
+!dist/ANTI.exe
 
 # Config local
 config.json
