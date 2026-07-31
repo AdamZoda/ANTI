@@ -236,7 +236,7 @@ def scan_windows_prefetch(progress_callback=None, pct=73):
     is_wiped = False
     
     if progress_callback:
-        progress_callback("Forensique Prefetch", pct, "Analyse des traces d'exécution Windows...")
+        progress_callback("Forensique Prefetch", pct, "Analyse des traces d'exécution Windows et des lecteurs externes...")
 
     if not os.path.exists(prefetch_dir):
         return {"traces": traces, "total_pf_count": 0, "is_wiped": True}
@@ -246,32 +246,53 @@ def scan_windows_prefetch(progress_callback=None, pct=73):
         pf_files = [f for f in all_entries if f.lower().endswith(".pf")]
         total_pf_count = len(pf_files)
 
-        # Une machine Windows normale contient 100 à 500 fichiers .pf.
-        # Moins de 15 fichiers .pf signale un nettoyage manuel récent (Nettoyage de Traces).
         if total_pf_count < 15:
             is_wiped = True
 
         for file in pf_files:
             exec_name = file.split("-")[0].lower()
+            pf_path = os.path.join(prefetch_dir, file)
             
             if any(legit in exec_name for legit in LEGITIMATE_FRAMEWORKS):
                 continue
 
+            # 1. Vérification par signature de cheat connu
+            is_cheat_match = False
+            matched_cheat = None
             for cheat in SPECIFIC_CHEATS:
                 if cheat in exec_name:
-                    pf_path = os.path.join(prefetch_dir, file)
-                    mtime = os.path.getmtime(pf_path)
-                    last_exec = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    traces.append({
-                        "cheat_signature": cheat,
-                        "executable_name": exec_name,
-                        "prefetch_file"  : file,
-                        "last_executed"  : last_exec,
-                        "severity"       : "CRITICAL",
-                        "description"    : f"Trace d'exécution Windows (Prefetch) pour '{exec_name}' (Dernière exécution : {last_exec})"
-                    })
+                    is_cheat_match = True
+                    matched_cheat = cheat
                     break
+
+            # 2. Extraction du chemin / lecteur d'origine depuis les métadonnées brutes Prefetch
+            executed_from_external = False
+            origin_info = ""
+            try:
+                with open(pf_path, "rb") as pf:
+                    raw_data = pf.read(16384)
+                    # Chercher des références de volumes ou de dossiers (ex: \VOLUME{...}\ or D:\, E:\)
+                    import re as _re
+                    drive_matches = _re.findall(b'\\\\VOLUME\\{[0-9a-fA-F-]+\\}|\\\\DEVICE\\\\HARDDISKVOLUME[0-9]+', raw_data, _re.IGNORECASE)
+                    if drive_matches:
+                        v_str = drive_matches[0].decode('utf-8', errors='ignore')
+                        origin_info = f" Volume: {v_str}"
+            except Exception:
+                pass
+
+            mtime = os.path.getmtime(pf_path)
+            last_exec = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            if is_cheat_match:
+                traces.append({
+                    "cheat_signature": matched_cheat,
+                    "executable_name": exec_name,
+                    "prefetch_file"  : file,
+                    "last_executed"  : last_exec,
+                    "severity"       : "CRITICAL",
+                    "description"    : f"Trace d'exécution Windows (Prefetch) pour cheat '{exec_name}' (Dernière exécution : {last_exec}){origin_info}"
+                })
+
     except (PermissionError, OSError):
         pass
 
