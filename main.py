@@ -32,15 +32,20 @@ def main():
     scan_data = run_system_scan(progress_callback=update_ui)
     scan_data["scan_id"] = scan_id
 
-    # 3. Transmission vers Supabase — récupère le verdict normalisé
+    # 3. Transmission vers Supabase avec mise à jour du loader
+    render_progress("Transmission Data", 98, "Transmission sécurisée vers la base de données...")
     result  = transmit_scan_to_supabase(scan_id, scan_data)
     verdict = result.get("verdict", scan_data.get("risk_summary", {}).get("verdict", "CLEAN"))
 
     # 4. Notification Discord webhook (silencieuse si webhook absent)
     send_to_discord(scan_id, scan_data, verdict)
 
-    # 5. Affichage final anonymisé pour le Client
+    # 5. Forcer le loader à 100% avec l'icône de succès
+    render_progress("Scan Terminé", 100, "Rapport sécurisé transmis avec succès")
+
+    # 6. Affichage final anonymisé pour le Client
     print_client_completion(scan_id)
+
 
 if __name__ == "__main__":
     main()

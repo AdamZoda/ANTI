@@ -9,7 +9,7 @@ BANNER_LOGO = f"""\033[96m
 ================================================================================
    █████╗ ███╗   ██╗████████╗██╗     {SHIELD_ICON} ANTI DEFENSE SYSTEM
   ██╔══██╗████╗  ██║╚══██╔══╝██║     System Integrity & Telemetry Scanner
-  ███████║██╔██╗ ██║   ██║   ██║     Version 2.5 (High-Perf Parallel & Multi-Tokens)
+  ███████║██╔██╗ ██║   ██║   ██║     Version 2.5 (MAJESTIC)
   ██╔══██║██║╚██╗██║   ██║   ██║     100% Defensive Security Engine
   ██║  ██║██║ ╚████║   ██║   ██║
   ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝
@@ -34,49 +34,52 @@ _spinner_idx    = 0
 
 def render_progress(stage, percent, extra_info=""):
     """
-    Loader dynamique clean et élégant sous l'ASCII Art.
+    Loader dynamique clean, élégant et fluide (sans saut de ligne intempestif).
     """
     global _spinner_idx
+
+    # S'assurer que le pourcentage commence au moins à 1% pour éviter le sentiment de freeze
+    display_pct = max(1, min(100, int(percent)))
 
     _spinner_idx = (_spinner_idx + 1) % len(_spinner_frames)
     spinner = _spinner_frames[_spinner_idx]
 
-    bar_width = 28
-    filled = int(bar_width * percent // 100)
+    bar_width = 24
+    filled = int(bar_width * display_pct // 100)
     bar = "━" * filled + "╌" * (bar_width - filled)
 
-    if percent >= 100:
+    if display_pct >= 100:
         color = _GREEN
         spinner = "✓"
-    elif percent >= 70:
+    elif display_pct >= 70:
         color = _CYAN
-    elif percent >= 40:
+    elif display_pct >= 40:
         color = "\033[94m"   # bleu
     else:
         color = _YELLOW
 
-    # Si un chemin long est passé, garder les 55 derniers caractères pour voir le nom de fichier / sous-dossier actuel
-    if extra_info:
-        if len(extra_info) > 55:
-            info_display = "..." + extra_info[-52:]
-        else:
-            info_display = extra_info
+    # Tronquer proprement l'extra_info pour s'adapter aux petits terminaux CMD/PowerShell sans passer à la ligne
+    clean_info = extra_info.replace("\n", " ").replace("\r", "")
+    if len(clean_info) > 40:
+        info_display = "..." + clean_info[-37:]
     else:
-        info_display = ""
+        info_display = clean_info
 
+    # \r\033[K efface entièrement la ligne courante avant de réécrire
     line = (
-        f"\r{color}{spinner}{_RESET} "
+        f"\r\033[K{color}{spinner}{_RESET} "
         f"{color}[{bar}]{_RESET} "
-        f"{_BOLD}{percent:3d}%{_RESET}  "
-        f"{_DIM}{stage:<20}{_RESET}  "
-        f"\033[37m{info_display:<55}{_RESET}"
+        f"{_BOLD}{display_pct:3d}%{_RESET}  "
+        f"{_DIM}{stage:<16}{_RESET}  "
+        f"\033[37m{info_display:<40}{_RESET}"
     )
 
     sys.stdout.write(line)
     sys.stdout.flush()
 
-    if percent >= 100:
+    if display_pct >= 100:
         sys.stdout.write("\n")
+
 
 def print_client_completion(scan_id):
     """Affichage final sobre et épuré."""

@@ -67,6 +67,19 @@ LOW_CONFIDENCE_TERMS = [
 CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz"}
 
+# Extentions inoffensives à ignorer immédiatement (gain de temps massif)
+IGNORED_EXTENSIONS = {
+    ".pdf", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
+    ".mp3", ".mp4", ".avi", ".mkv", ".wav", ".ogg", ".flac", ".webm",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".csv",
+    ".css", ".html", ".htm", ".json", ".xml", ".log", ".md", ".ttf", ".woff", ".woff2",
+    ".dat", ".tmp", ".pak", ".bin", ".cache", ".idx", ".db", ".sqlite", ".store"
+}
+
+# Dossiers/Fichiers de type "cache" ou inutiles à sauter instantanément
+IGNORED_DIR_PREFIXES = ("cache", "cached", "crash", "logs", "temp", "tmp", "asset", "webcache")
+
+
 KNOWN_CHEAT_HASHES = {
     # Cheat 1 (loader.rar -> ntoskrnl.exe)
     "8e79140f00872ae0c3323e4bef2d797ab0a44a423d842818e3510dad649abce7": "Cheat 1 Sample (ntoskrnl.exe masqueraded loader)",
@@ -685,10 +698,11 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
     # ── Dossiers prioritaires ciblés (scan rapide et précis)
     standard_dirs = [
-        # FiveM : scan limité aux sous-dossiers cheat-suspects uniquement
+        # FiveM : scan ciblé plugins / crashes / nui (évite les Go de cache assets de FiveM)
         os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
-        os.path.join(local_appdata, "FiveM", "FiveM.app", "data"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "nui"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
+
         # Utilisateur
         os.path.join(user_profile, "Desktop"),
         os.path.join(user_profile, "Downloads"),
@@ -798,8 +812,9 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                         "windows", "program files", "program files (x86)",
                         "system32", "syswow64", "ea", "playnite", "razor",
                         "system volume information", "programdata",
-                        "recovery", "perflogs", "winsxs", "servicing"
-                    }
+                        "recovery", "perflogs", "winsxs", "servicing",
+                        "node_modules", ".git", ".cache", "gpu_cache"
+                    } and not d.lower().startswith(IGNORED_DIR_PREFIXES)
                 ]
 
                 if depth >= depth_limit:
@@ -809,12 +824,18 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                 file_count = 0
                 for file in files:
                     file_count += 1
-                    full_path = os.path.join(root, file)
                     file_lower = file.lower()
                     ext = os.path.splitext(file_lower)[1]
 
-                    if progress_callback and file_count % 50 == 0:
+                    # Sauter instantanément les extensions inoffensives (.pdf, .txt, .png, etc.)
+                    if ext in IGNORED_EXTENSIONS or file_lower.startswith("cache"):
+                        continue
+
+                    full_path = os.path.join(root, file)
+
+                    if progress_callback and file_count % 100 == 0:
                         progress_callback("Scan Fichiers", pct, f"{file}")
+
 
                     if is_recent_dir and ext == ".lnk":
                         try:
