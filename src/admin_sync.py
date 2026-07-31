@@ -16,8 +16,12 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 # ─────────────────────────────────────────────
 # CHARGEMENT CONFIG DISCORD WEBHOOK
 # ─────────────────────────────────────────────
-# Chemin du fichier config.json, résolu même en mode EXE
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+# Chemin du fichier config.json — racine du projet (dev) ou bundle PyInstaller (EXE)
+import sys as _sys
+if hasattr(_sys, '_MEIPASS'):
+    _CONFIG_PATH = os.path.join(_sys._MEIPASS, "config.json")
+else:
+    _CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
 _DISCORD_WEBHOOK_URL = None
 
 def _load_webhook_config():
