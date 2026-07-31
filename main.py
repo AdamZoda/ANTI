@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import subprocess
 import time
+import threading
 from src.ui import print_banner, render_progress, print_client_completion
 from src.scanner import run_system_scan
 from src.admin_sync import (
