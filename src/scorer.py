@@ -155,11 +155,9 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
         if max_score < 65:
             max_score = 65
 
-    # 3. Périphérique USB débranché récemment
+    # 3. Périphérique USB débranché récemment (Simple observation d'information, pas de sur-scoring artificiel sans cheat)
     if system_info and system_info.get("has_disconnected_usb"):
         confidence_reasons.append("Un ou plusieurs périphériques de stockage USB / SSD externes ont été déconnectés récemment de la machine.")
-        if max_score < 45:
-            max_score = 45
 
     elif has_prefetch_trace:
         confidence_level = "MOYEN-ÉLEVÉ (MEDIUM-HIGH)"
@@ -169,10 +167,10 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
     # ── Verdict final
     if max_score >= 60:
         threat_level = "ÉLEVÉ (HIGH)"
-        verdict = "CHEATER (Triche Détectée ou Exécutée)"
+        verdict = "CHEATER"
     elif max_score >= 30:
         threat_level = "MODÉRÉ (MEDIUM)"
-        verdict = "ANORMAL (À Inspecter)"
+        verdict = "ANORMAL"
     else:
         threat_level = "FAIBLE (LOW - SÉCURISÉ)"
         verdict = "CLEAN"

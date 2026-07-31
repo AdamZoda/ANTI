@@ -1163,9 +1163,22 @@ def run_system_scan(progress_callback=None):
     # Ajouter les traces forensiques Windows Defender
     if defender_traces:
         for trace in defender_traces:
+            res_path = trace.get("resources", "")
+            raw_threat = trace.get("threat_name", "Menace Defender")
+            # Extraire le nom de fichier propre depuis la ressource si présent (ex: file:_C:\Path\loader.exe -> loader.exe)
+            extracted_name = None
+            if "file:" in res_path.lower():
+                clean_p = res_path.split("file:", 1)[-1].strip("_").strip()
+                extracted_name = os.path.basename(clean_p)
+            elif "\\" in res_path or "/" in res_path:
+                extracted_name = os.path.basename(res_path)
+
+            display_app_name = extracted_name if extracted_name else f"{raw_threat}"
+
             applications.append({
-                "app_name"        : trace["threat_name"],
-                "exe_path"        : trace["resources"],
+                "app_name"        : display_app_name,
+                "threat_name"     : raw_threat,
+                "exe_path"        : res_path,
                 "sha256"          : None,
                 "signature"       : {"signed": False, "status": "DefenderDetectionTrace"},
                 "instances_count" : 0,
@@ -1176,7 +1189,7 @@ def run_system_scan(progress_callback=None):
                     "risk_score"  : 95,
                     "observations": [{
                         "severity"   : "CRITICAL",
-                        "title"      : "Détection Historique Windows Defender",
+                        "title"      : f"Détection Defender ({raw_threat})",
                         "description": trace["description"]
                     }]
                 }
