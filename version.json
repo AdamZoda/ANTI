@@ -1,5 +1,5 @@
 {
-  "version": "1.9",
-  "changelog": "v1.9: Traçabilité des exécutables lancés depuis clés USB/SSD externes débranchés (Prefetch Volume Origin) + Fix scoring USB",
+  "version": "2.0",
+  "changelog": "v2.0: Notification Discord Webhook (embed riche: score/verdict/HWID/apps suspectes), Fix admin_sync, Forensique USB + Prefetch Volume Origin",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
