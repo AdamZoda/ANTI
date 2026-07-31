@@ -1,5 +1,5 @@
 {
-  "version": "2.1",
-  "changelog": "v2.1: Extraction infos systeme/Discord, detection améliorée, admin_sync fixes, nouvelles signatures scanner",
+  "version": "2.2",
+  "changelog": "v2.2: Extraction infos systeme/Discord, detection améliorée, admin_sync fixes, nouvelles signatures scanner",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
