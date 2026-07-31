@@ -1,4 +1,5 @@
 import sys
+import os
 from src.ui import print_banner, render_progress, print_client_completion
 from src.scanner import run_system_scan
 from src.admin_sync import (
@@ -34,3 +35,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+if hasattr(sys, '_MEIPASS'):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.abspath(".")
+
+config_path = os.path.join(base_path, "config.json")
