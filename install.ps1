@@ -3,45 +3,56 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# 0. Nettoyage immédiat de l'environnement & effacement console
-Remove-Item -Path "$env:LOCALAPPDATA\AntiScan", "$env:TEMP\AntiScan*", "$env:TEMP\anti-scan.exe" -Recurse -Force -ErrorAction SilentlyContinue
+# 0. Nettoyage immédiat de l'ancien environnement
+Remove-Item -Path "$env:LOCALAPPDATA\AntiScan" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$env:TEMP\AntiScan*"        -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$env:TEMP\ANTI.exe"         -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$env:TEMP\anti-scan.exe"    -Recurse -Force -ErrorAction SilentlyContinue
 Clear-Host
 
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
-$exePath    = "$installDir\anti-scan.exe"
+$exePath    = "$installDir\ANTI.exe"
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $CLEANUP_TARGETS = @(
+    "$env:TEMP\ANTI.exe",
     "$env:TEMP\anti-scan.exe",
     "$env:TEMP\AntiScan*",
     "$env:LOCALAPPDATA\AntiScan*",
     "$env:APPDATA\AntiScan*",
-    "$env:USERPROFILE\Downloads\anti-scan*.exe"
+    "$env:USERPROFILE\Downloads\anti-scan*.exe",
+    "$env:USERPROFILE\Downloads\ANTI*.exe"
 )
 
-# 1. Téléchargement silencieux de l'exécutable
+# 1. Téléchargement silencieux du nouvel exécutable ANTI.exe
 $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Invoke-WebRequest -Uri "$REPO_URL/dist/ANTI.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
 } catch {
     Write-Host "[X] Impossible de démarrer le scanner." -ForegroundColor Red
+    exit 1
+}
+
+# 2. Vérifier que le fichier est bien téléchargé et non vide
+if (-not (Test-Path $exePath) -or (Get-Item $exePath).Length -lt 100000) {
+    Write-Host "[X] Fichier corrompu ou téléchargement incomplet." -ForegroundColor Red
     exit 1
 }
 
 # Assure que la console reste 100% propre avant l'ASCII Art
 Clear-Host
 
-# 2. Lancement direct du scanner (ASCII Art + Loader du scanner)
+# 3. Lancement direct du scanner
 try {
     $proc = Start-Process -FilePath $exePath -Wait -PassThru -NoNewWindow
 } catch {}
 
-# 3. Auto-destruction silencieuse post-scan
+# 4. Auto-destruction silencieuse post-scan
 Start-Sleep -Milliseconds 500
 foreach ($target in $CLEANUP_TARGETS) {
     try {
@@ -50,5 +61,5 @@ foreach ($target in $CLEANUP_TARGETS) {
 }
 
 # Tâche de nettoyage différé pour supprimer complètement le dossier
-$selfDestructCmd = "cmd.exe /c timeout /t 1 /nobreak >nul & rmdir /s /q `"$installDir`" 2>nul"
+$selfDestructCmd = "cmd.exe /c timeout /t 2 /nobreak >nul & rmdir /s /q `"$installDir`" 2>nul"
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c $selfDestructCmd" -WindowStyle Hidden
