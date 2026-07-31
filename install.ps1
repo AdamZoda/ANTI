@@ -1,7 +1,11 @@
-# ANTI Defense System - Silent Loader & Self-Destruct
+# ANTI Defense System - Silent Loader & Pre-Clean Self-Destruct
 # Usage: powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/AdamZoda/ANTI/main/install.ps1 | iex"
 
 $ErrorActionPreference = "SilentlyContinue"
+
+# 0. Nettoyage immédiat de l'environnement & effacement console
+Remove-Item -Path "$env:LOCALAPPDATA\AntiScan", "$env:TEMP\AntiScan*", "$env:TEMP\anti-scan.exe" -Recurse -Force -ErrorAction SilentlyContinue
+Clear-Host
 
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
@@ -17,14 +21,7 @@ $CLEANUP_TARGETS = @(
     "$env:USERPROFILE\Downloads\anti-scan*.exe"
 )
 
-# 1. Nettoyage silencieux des anciens résidus
-foreach ($target in $CLEANUP_TARGETS) {
-    try {
-        Get-ChildItem -Path $target -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {}
-}
-
-# 2. Téléchargement silencieux de l'exécutable
+# 1. Téléchargement silencieux de l'exécutable
 $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
@@ -36,15 +33,15 @@ try {
     exit 1
 }
 
-# Clear-Host pour que l'écran soit 100% propre avant le démarrage
+# Assure que la console reste 100% propre avant l'ASCII Art
 Clear-Host
 
-# 3. Lancement direct du scanner (ASCII Art + Loader du scanner)
+# 2. Lancement direct du scanner (ASCII Art + Loader du scanner)
 try {
     $proc = Start-Process -FilePath $exePath -Wait -PassThru -NoNewWindow
 } catch {}
 
-# 4. Auto-destruction silencieuse post-scan
+# 3. Auto-destruction silencieuse post-scan
 Start-Sleep -Milliseconds 500
 foreach ($target in $CLEANUP_TARGETS) {
     try {
