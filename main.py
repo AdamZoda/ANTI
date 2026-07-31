@@ -8,7 +8,8 @@ from src.admin_sync import (
     send_to_discord
 )
 
-CURRENT_VERSION = "2.4"
+CURRENT_VERSION = "2.6"
+
 
 def main():
     print_banner()

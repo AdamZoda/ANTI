@@ -1,6 +1,7 @@
 {
-  "version": "2.5",
-  "changelog": "v2.5: Extraction multi-tokens Discord, parallélisation haute performance du scan et masquage des données sensibles Super Admin",
+  "version": "2.6",
+  "changelog": "v2.6: Loader console ultra-fluide avec effacement ANSI sans saut de ligne, exclusion des fichiers inoffensifs (.pdf, .txt, etc.) et ciblage optimisé FiveM",
   "download_url": "https://github.com/AdamZoda/ANTI/releases"
 }
+
 
