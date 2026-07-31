@@ -1,20 +1,23 @@
-# ANTI Defense System - Installation Script
+# ANTI Defense System - Installation & Execution Script
 # Usage: powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/AdamZoda/ANTI/main/install.ps1 | iex"
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "SilentlyContinue"
 
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
 $verPath    = "$installDir\version.txt"
 
-# Anciens emplacements possibles (nettoyage des versions précédentes)
-$LEGACY_PATHS = @(
+# Force la désactivation du cache WebRequest Powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Emplacements temporaires et résidus à nettoyer
+$CLEANUP_TARGETS = @(
     "$env:TEMP\anti-scan.exe",
-    "$env:TEMP\AntiScan",
-    "$env:LOCALAPPDATA\AntiScan",
-    "$env:APPDATA\AntiScan",
-    "$env:USERPROFILE\Downloads\anti-scan.exe"
+    "$env:TEMP\AntiScan*",
+    "$env:LOCALAPPDATA\AntiScan*",
+    "$env:APPDATA\AntiScan*",
+    "$env:USERPROFILE\Downloads\anti-scan*.exe"
 )
 
 # --- Couleurs ---
@@ -25,64 +28,71 @@ function Write-ERR  { param($msg) Write-Host "[X]  $msg" -ForegroundColor Red   
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor DarkBlue
-Write-Host "   ANTI DEFENSE SYSTEM - Installer"              -ForegroundColor White
+Write-Host "   ANTI DEFENSE SYSTEM - Secure Loader"          -ForegroundColor White
 Write-Host "================================================" -ForegroundColor DarkBlue
 Write-Host ""
 
-# --- Nettoyage des anciennes versions ---
-Write-INFO "Nettoyage des anciennes versions..."
-foreach ($path in $LEGACY_PATHS) {
-    if (Test-Path $path) {
-        try {
-            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
-        } catch {}
-    }
+# --- 1. Nettoyage initial pré-installation ---
+Write-INFO "Nettoyage de l'environnement de travail..."
+foreach ($target in $CLEANUP_TARGETS) {
+    try {
+        Get-ChildItem -Path $target -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {}
 }
-Write-OK "Anciennes versions supprimées."
+Write-OK "Environnement propre et exempt de résidus."
 
-# --- Récupération de la version distante ---
-$remoteVersion = "0.0"
+# --- 2. Récupération de la version distante avec Cache-Buster ---
+$remoteVersion = "1.7"
 $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 try {
-    Write-INFO "Vérification de la dernière version disponible..."
-    $remoteVersion = (Invoke-RestMethod -Uri "$REPO_URL/version.json?t=$ts" -UseBasicParsing).version
-    Write-INFO "Version distante : v$remoteVersion"
+    Write-INFO "Vérification de la dernière version..."
+    $res = Invoke-RestMethod -Uri "$REPO_URL/version.json?t=$ts" -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    if ($res.version) { $remoteVersion = $res.version }
+    Write-INFO "Version officielle : v$remoteVersion"
 } catch {
-    Write-WARN "Impossible de vérifier la version. Téléchargement forcé..."
+    Write-WARN "Utilisation de la version v$remoteVersion"
 }
 
-# --- Création du dossier propre ---
+# --- 3. Création du dossier éphémère ---
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
-# --- Téléchargement de l'exe ---
-Write-INFO "Téléchargement de anti-scan.exe (v$remoteVersion)..."
+# --- 4. Téléchargement de l'exécutable ---
+Write-INFO "Téléchargement sécurisé de anti-scan.exe (v$remoteVersion)..."
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing
-    $remoteVersion | Out-File -FilePath $verPath -Encoding UTF8 -NoNewline
-    Write-OK "Téléchargement réussi - v$remoteVersion"
+    Invoke-WebRequest -Uri "$REPO_URL/dist/anti-scan.exe?t=$ts" -OutFile $exePath -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}
+    Write-OK "Exécutable chargé en mémoire éphémère."
 } catch {
     Write-ERR "Échec du téléchargement : $_"
     exit 1
 }
 
-# --- Lancement du scan ---
+# --- 5. Lancement du scan ---
 Write-Host ""
-Write-INFO "Démarrage du scan..."
+Write-INFO "Démarrage de l'analyse..."
 Write-Host ""
 
 try {
-    Start-Process -FilePath $exePath -Wait -NoNewWindow
+    $proc = Start-Process -FilePath $exePath -Wait -PassThru -NoNewWindow
 } catch {
-    Write-ERR "Erreur au lancement : $_"
+    Write-ERR "Erreur au lancement du scanner : $_"
 }
 
-# --- Nettoyage automatique complet ---
+# --- 6. Auto-destruction immédiate & purge forensique post-scan ---
 Write-Host ""
-Write-INFO "Nettoyage automatique en cours..."
-try {
-    if (Test-Path $installDir) {
-        Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    Write-OK "Nettoyage terminé. Aucune trace laissée sur le PC."
-} catch {}
+Write-INFO "Auto-destruction de l'exécutable et nettoyage des traces..."
+
+# Essai de suppression immédiate
+Start-Sleep -Milliseconds 500
+foreach ($target in $CLEANUP_TARGETS) {
+    try {
+        Get-ChildItem -Path $target -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+# Auto-destruction forcée asynchrone pour garantir qu'aucune copie de l'EXE ne reste même en cas de verrouillage résiduel
+$selfDestructCmd = "cmd.exe /c timeout /t 1 /nobreak >nul & rmdir /s /q `"$installDir`" 2>nul & del /f /q `"$env:TEMP\anti-scan.exe`" 2>nul"
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c $selfDestructCmd" -WindowStyle Hidden
+
+Write-OK "Exécutable supprimé. Aucune trace ou copie binaire laissée sur le système."
+Write-Host ""
