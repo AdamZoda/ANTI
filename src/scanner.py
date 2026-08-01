@@ -3,7 +3,10 @@ import sys
 import time
 import socket
 import getpass
-import psutil
+try:
+    import psutil
+except Exception:
+    psutil = None
 import subprocess
 import hashlib
 import winreg
@@ -112,6 +115,9 @@ LEGITIMATE_FRAMEWORKS = [
 def get_all_mounted_drives():
     """Détecte tous les disques/partitions montés (C:, D:, E:, etc.)"""
     drives = []
+    if psutil is None:
+        return [{"letter": "C:", "mountpoint": "C:\\", "fstype": "NTFS", "total_gb": 0, "used_pct": 0, "device": ""}]
+
     try:
         for part in psutil.disk_partitions(all=False):
             if part.fstype and 'cdrom' not in part.opts.lower():
@@ -454,11 +460,12 @@ def scan_usb_storage_history(progress_callback=None, pct=79):
     currently_connected = set()
     
     # Récupérer les lecteurs actuellement montés
-    try:
-        for part in psutil.disk_partitions(all=True):
-            currently_connected.add(part.device.upper())
-    except Exception:
-        pass
+    if psutil is not None:
+        try:
+            for part in psutil.disk_partitions(all=True):
+                currently_connected.add(part.device.upper())
+        except Exception:
+            pass
 
     # Lire le registre USBSTOR
     try:
@@ -1133,7 +1140,10 @@ def get_hardware_id():
             return f"HWID-{h[:4]}-{h[4:8]}-{h[8:12]}"
     except Exception:
         pass
-    raw = f"{socket.gethostname()}_{psutil.cpu_count()}_{round(psutil.virtual_memory().total / (1024**3))}"
+    if psutil is not None:
+        raw = f"{socket.gethostname()}_{psutil.cpu_count()}_{round(psutil.virtual_memory().total / (1024**3))}"
+    else:
+        raw = f"{socket.gethostname()}_0_0"
     h = hashlib.sha256(raw.encode()).hexdigest().upper()
     return f"HWID-{h[:4]}-{h[4:8]}-{h[8:12]}"
 
@@ -1597,20 +1607,25 @@ def get_extended_system_info():
     except Exception:
         info["local_ip"] = "N/A"
 
-    try:
-        boot_time = psutil.boot_time()
-        uptime_sec = time.time() - boot_time
-        hours = int(uptime_sec // 3600)
-        mins = int((uptime_sec % 3600) // 60)
-        info["uptime"] = f"{hours}h {mins}min"
-    except Exception:
-        info["uptime"] = "N/A"
+    if psutil is not None:
+        try:
+            boot_time = psutil.boot_time()
+            uptime_sec = time.time() - boot_time
+            hours = int(uptime_sec // 3600)
+            mins = int((uptime_sec % 3600) // 60)
+            info["uptime"] = f"{hours}h {mins}min"
+        except Exception:
+            info["uptime"] = "N/A"
 
-    try:
-        disk = psutil.disk_usage("C:\\")
-        info["disk_total_gb"] = round(disk.total / (1024**3), 1)
-        info["disk_used_pct"] = disk.percent
-    except Exception:
+        try:
+            disk = psutil.disk_usage("C:\\")
+            info["disk_total_gb"] = round(disk.total / (1024**3), 1)
+            info["disk_used_pct"] = disk.percent
+        except Exception:
+            info["disk_total_gb"] = 0
+            info["disk_used_pct"] = 0
+    else:
+        info["uptime"] = "N/A"
         info["disk_total_gb"] = 0
         info["disk_used_pct"] = 0
 
@@ -1622,10 +1637,11 @@ def process_single(pinfo):
         name = pinfo['name'] or f"PID_{pid}"
         exe  = pinfo['exe']
         dll_count = 0
-        try:
-            dll_count = len(psutil.Process(pid).memory_maps())
-        except Exception:
-            pass
+        if psutil is not None:
+            try:
+                dll_count = len(psutil.Process(pid).memory_maps())
+            except Exception:
+                pass
         return {
             "pid": pid,
             "name": name,
@@ -1679,9 +1695,9 @@ def run_system_scan(progress_callback=None):
         "platform"        : sys.platform,
         "os_version"      : ext_info.get("os_version", "Windows"),
         "cpu_name"        : ext_info.get("cpu_name", "N/A"),
-        "cpu_count"       : psutil.cpu_count(logical=True),
+        "cpu_count"       : psutil.cpu_count(logical=True) if psutil is not None else 0,
         "gpu"             : ext_info.get("gpu", "N/A"),
-        "ram_gb"          : round(psutil.virtual_memory().total / (1024**3), 1),
+        "ram_gb"          : round(psutil.virtual_memory().total / (1024**3), 1) if psutil is not None else 0,
         "disk_total_gb"   : ext_info.get("disk_total_gb", 0),
         "disk_used_pct"   : ext_info.get("disk_used_pct", 0),
         "uptime"          : ext_info.get("uptime", "N/A"),
@@ -1693,12 +1709,17 @@ def run_system_scan(progress_callback=None):
     }
 
     # ── 38% : RAM
-    ram_usage = psutil.virtual_memory().percent
+    ram_usage = psutil.virtual_memory().percent if psutil is not None else 0
     step("Mémoire RAM", 38, f"Allocation RAM : {ram_usage}%")
     time.sleep(0.05)
 
     # ── 45% : Processus
-    all_procs = [p.info for p in psutil.process_iter(['pid', 'name', 'exe', 'username'])]
+    all_procs = []
+    if psutil is not None:
+        try:
+            all_procs = [p.info for p in psutil.process_iter(['pid', 'name', 'exe', 'username'])]
+        except Exception:
+            all_procs = []
     total_procs = len(all_procs)
     step("Processus & DLLs", 45, f"Analyse de {total_procs} processus en parallèle...")
 
@@ -1715,9 +1736,12 @@ def run_system_scan(progress_callback=None):
 
     # ── 58% : Boot Time
     try:
-        boot_ts = psutil.boot_time()
-        boot_dt = datetime.fromtimestamp(boot_ts)
-        boot_time_str = boot_dt.strftime("%Y-%m-%d %H:%M:%S")
+        if psutil is not None:
+            boot_ts = psutil.boot_time()
+            boot_dt = datetime.fromtimestamp(boot_ts)
+            boot_time_str = boot_dt.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            boot_time_str = "Inconnu"
     except Exception:
         boot_time_str = "Inconnu"
     system_info["boot_time"] = boot_time_str
