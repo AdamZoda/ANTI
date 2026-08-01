@@ -6,11 +6,32 @@ import tempfile
 # ──────────────────────────────────────────────────────────────────────────
 # CRASH LOGGER — défini AVANT tout autre import
 # ──────────────────────────────────────────────────────────────────────────
+
+# Variables globales pour le rapport de crash
+_g_scan_id   = None
+_g_hwid      = None
+_g_sys_info  = None
+
+
 def _write_crash_log(tb_str):
     try:
         log_path = os.path.join(tempfile.gettempdir(), "anti-crash.log")
         with open(log_path, "w", encoding="utf-8") as f:
             f.write(tb_str)
+    except Exception:
+        pass
+
+
+def _send_crash_report(tb_str):
+    """Envoie le crash/erreur vers Supabase + Discord même si le scan n'est pas terminé."""
+    try:
+        from src.admin_sync import transmit_crash_to_supabase
+        transmit_crash_to_supabase(
+            scan_id=_g_scan_id,
+            hwid=_g_hwid,
+            system_info=dict(_g_sys_info) if _g_sys_info else {},
+            tb_str=tb_str
+        )
     except Exception:
         pass
 
@@ -36,7 +57,7 @@ except Exception:
     _write_crash_log(traceback.format_exc())
     os._exit(1)
 
-CURRENT_VERSION = "2.9"
+CURRENT_VERSION = "3.0"
 
 
 def pre_clean_environment():
@@ -74,10 +95,18 @@ def self_destruct(delay_sec=2):
         pass
 
 
-def arm_watchdog_timer(max_lifetime_sec=300):
-    """Watchdog : si l'application plante > 5 min, destruction forcée."""
+def arm_watchdog_timer(max_lifetime_sec=360):
+    """Watchdog : si le scanner plante ou dépasse 6 min, envoie le crash et se détruit."""
     def _watchdog():
         time.sleep(max_lifetime_sec)
+        # Envoyer un rapport de crash (timeout)
+        try:
+            _send_crash_report(
+                f"[WATCHDOG TIMEOUT] Le scanner a dépassé {max_lifetime_sec}s sans terminer.\n"
+                f"HWID: {_g_hwid} | ScanID: {_g_scan_id}"
+            )
+        except Exception:
+            pass
         self_destruct(delay_sec=1)
         os._exit(1)
     threading.Thread(target=_watchdog, daemon=True).start()
@@ -119,6 +148,8 @@ def check_and_perform_update():
 
 
 def main():
+    global _g_scan_id, _g_hwid, _g_sys_info
+
     # Réduire la priorité du processus
     try:
         import ctypes
@@ -129,21 +160,24 @@ def main():
     # Imports des modules internes (lazy — ici seulement)
     try:
         from src.ui import print_banner, render_progress, print_client_completion
-        from src.scanner import run_system_scan
+        from src.scanner import run_system_scan, get_hardware_id
         from src.admin_sync import (
             get_next_scan_id_from_supabase,
+            transmit_initial_scan_to_supabase,
             transmit_scan_to_supabase,
             send_to_discord,
         )
     except Exception:
-        _write_crash_log(traceback.format_exc())
+        tb = traceback.format_exc()
+        _write_crash_log(tb)
+        _send_crash_report(f"[IMPORT ERROR] Echec chargement modules internes:\n{tb}")
         os._exit(1)
 
     # 1. Mise à jour silencieuse
     check_and_perform_update()
 
-    # 2. Watchdog
-    arm_watchdog_timer(max_lifetime_sec=300)
+    # 2. Watchdog (6 min max)
+    arm_watchdog_timer(max_lifetime_sec=360)
 
     # 3. Nettoyage pré-scan
     pre_clean_environment()
@@ -151,26 +185,53 @@ def main():
     # 4. Affichage banner terminal
     print_banner()
 
-    # 5. Récupération du scan_id
-    scan_id = get_next_scan_id_from_supabase()
+    # 5. Récupération HWID immédiatement (pour crash reports)
+    try:
+        _g_hwid = get_hardware_id()
+    except Exception:
+        _g_hwid = "UNKNOWN"
 
-    # 6. Scan système avec progress bar terminal
+    # 6. Récupération du scan_id
+    scan_id = get_next_scan_id_from_supabase()
+    _g_scan_id = scan_id
+
+    # 7. ── ENVOI INITIAL ── Enregistrement immédiat dans Supabase
+    #    Visible sur le dashboard AVANT la fin du scan
+    render_progress("Initialisation", 5, f"Enregistrement scan {scan_id} (HWID: {_g_hwid})")
+    try:
+        initial_info = {
+            "hwid"    : _g_hwid,
+            "hostname": __import__("socket").gethostname(),
+            "user"    : __import__("getpass").getuser(),
+            "status"  : "SCANNING_IN_PROGRESS"
+        }
+        _g_sys_info = initial_info
+        transmit_initial_scan_to_supabase(scan_id, initial_info)
+    except Exception:
+        pass
+
+    # 8. Scan système avec progress bar terminal
+    render_progress("Scan Système", 8, "Démarrage de l'analyse forensique...")
     scan_data = run_system_scan(progress_callback=render_progress)
     scan_data["scan_id"] = scan_id
 
-    # 7. Transmission Supabase
+    # Mise à jour des variables globales avec les vraies infos
+    _g_hwid     = scan_data.get("hwid", _g_hwid)
+    _g_sys_info = scan_data.get("system_info", _g_sys_info)
+
+    # 9. Transmission Supabase (rapport complet — écrase l'initial)
     render_progress("Transmission", 98, "Envoi sécurisé vers la base de données...")
     result  = transmit_scan_to_supabase(scan_id, scan_data)
     verdict = result.get("verdict", scan_data.get("risk_summary", {}).get("verdict", "CLEAN"))
 
-    # 8. Notification Discord
+    # 10. Notification Discord
     send_to_discord(scan_id, scan_data, verdict)
 
-    # 9. Affichage final
+    # 11. Affichage final
     render_progress("Terminé", 100, f"Rapport transmis (ID: {scan_id})")
     print_client_completion(scan_id)
 
-    # 10. Auto-destruction après 3 secondes
+    # 12. Auto-destruction après 3 secondes
     time.sleep(3)
     self_destruct(delay_sec=1)
     os._exit(0)
@@ -180,5 +241,9 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        _write_crash_log(traceback.format_exc())
+        tb = traceback.format_exc()
+        _write_crash_log(tb)
+        # ⚡ ENVOI DU CRASH VERS SUPABASE + DISCORD
+        _send_crash_report(tb)
+        time.sleep(2)  # Laisser le temps à l'envoi réseau de se terminer
         os._exit(1)

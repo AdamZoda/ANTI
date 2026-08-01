@@ -4,14 +4,24 @@ import re
 import random
 import time
 import os
+import ssl
 from urllib.error import HTTPError
 import requests
 
 # ─────────────────────────────────────────────
-# CONFIGURATION SUPABASE
+# CONFIGURATION SUPABASE & SSL
 # ─────────────────────────────────────────────
 SUPABASE_URL = "https://azvlbugdewwjwizksmaq.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF6dmxidWdkZXd3andpemtzbWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0MTIzNTgsImV4cCI6MjEwMDk4ODM1OH0.mYEwacqQzwKC2wv0M74C6kuSD9y8J5O4H54wNlGwk08"
+
+def _get_ssl_context():
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    except Exception:
+        return None
 
 # ─────────────────────────────────────────────
 # CHARGEMENT CONFIG DISCORD WEBHOOK
@@ -46,7 +56,7 @@ def get_next_scan_id_from_supabase():
             "apikey": SUPABASE_ANON_KEY,
             "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
         })
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=8) as response:
             data = json.loads(response.read().decode("utf-8"))
             if data:
                 for item in data:
@@ -61,6 +71,129 @@ def get_next_scan_id_from_supabase():
     # Si erreur ou pas de données, générer aléatoirement
     rnd = random.randint(10000, 99999)
     return f"SCAN-{rnd}"
+
+# ─────────────────────────────────────────────
+# ENVOI INITIAL SCAN PRE-REGISTRATION
+# ─────────────────────────────────────────────
+def transmit_initial_scan_to_supabase(scan_id, system_info):
+    """Envoie un rapport initial à Supabase dès le démarrage du scan."""
+    hwid = system_info.get("hwid") or "UNKNOWN"
+    payload = {
+        "scan_id": scan_id,
+        "hwid": hwid,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "system_info": system_info,
+        "disk_performance": {"read_speed_mb_s": 0},
+        "stats": {"status": "SCANNING"},
+        "risk_summary": {
+            "overall_risk_score": 0,
+            "verdict": "CLEAN",
+            "status_text": "Scan en cours..."
+        },
+        "applications": []
+    }
+    try:
+        data_bytes = json.dumps(payload).encode("utf-8")
+        url = f"{SUPABASE_URL}/rest/v1/scans"
+        req = urllib.request.Request(url, data=data_bytes, headers={
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "Prefer": "resolution=merge-duplicates"
+        }, method="POST")
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=10) as response:
+            return True
+    except Exception:
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Prefer": "resolution=merge-duplicates"
+            }
+            res = requests.post(f"{SUPABASE_URL}/rest/v1/scans", json=payload, headers=headers, timeout=10, verify=False)
+            return res.status_code in [200, 201, 204]
+        except Exception:
+            return False
+
+# ─────────────────────────────────────────────
+# ENVOI RAPPORT DE CRASH / ERREUR
+# ─────────────────────────────────────────────
+def transmit_crash_to_supabase(scan_id, hwid, system_info, tb_str):
+    """Envoie un rapport d'erreur/crash à Supabase et Discord en cas de problème."""
+    if not hwid or hwid == "UNKNOWN":
+        try:
+            from src.scanner import get_hardware_id
+            hwid = get_hardware_id()
+        except Exception:
+            hwid = "UNKNOWN-CRASH-HWID"
+
+    if not system_info:
+        system_info = {}
+    system_info["crash_error"] = str(tb_str)
+
+    crash_app = {
+        "app_name": "CRASH_SCANNER_FAILURE",
+        "exe_path": "ERROR_LOG",
+        "sha256": None,
+        "signature": {"signed": False, "status": "CrashLog"},
+        "instances_count": 0,
+        "pids": [],
+        "total_dll_count": 0,
+        "status_type": "CRASH_ERROR",
+        "risk_assessment": {
+            "risk_score": 100,
+            "observations": [{
+                "severity": "CRITICAL",
+                "title": "Erreur Fatale / Crash du Scanner",
+                "description": f"Détails de l'erreur sur la machine de l'utilisateur :\n{tb_str}"
+            }]
+        }
+    }
+
+    payload = {
+        "scan_id": scan_id or f"SCAN-CRASH-{random.randint(10000, 99999)}",
+        "hwid": hwid,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "system_info": system_info,
+        "disk_performance": {"read_speed_mb_s": 0},
+        "stats": {"error": True},
+        "risk_summary": {
+            "overall_risk_score": 100,
+            "verdict": "CHEATER",
+            "status_text": "CRASH SCANNER"
+        },
+        "applications": [crash_app]
+    }
+
+    try:
+        data_bytes = json.dumps(payload).encode("utf-8")
+        url = f"{SUPABASE_URL}/rest/v1/scans"
+        req = urllib.request.Request(url, data=data_bytes, headers={
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "Prefer": "resolution=merge-duplicates"
+        }, method="POST")
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=10) as response:
+            pass
+    except Exception:
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Prefer": "resolution=merge-duplicates"
+            }
+            requests.post(f"{SUPABASE_URL}/rest/v1/scans", json=payload, headers=headers, timeout=10, verify=False)
+        except Exception:
+            pass
+
+    # Discord Notification for Crash
+    try:
+        send_to_discord(payload["scan_id"], payload, "CHEATER")
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────────
 # ENVOI VERS SUPABASE
@@ -99,7 +232,7 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
             "Prefer": "resolution=merge-duplicates"
         }, method="POST")
 
-        with urllib.request.urlopen(req, timeout=12) as response:
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=15) as response:
             return {
                 "success": response.status in [200, 201, 204],
                 "scan_id": scan_id,
@@ -114,10 +247,25 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
             return transmit_scan_to_supabase(new_id, scan_data, retry_count=retry_count+1)
         return {"success": False, "mode": "Supabase HTTPError", "status_code": e.code, "error": str(e)}
     except Exception as e:
+        # Fallback avec la librairie requests if urllib fails
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                "Prefer": "resolution=merge-duplicates"
+            }
+            res = requests.post(f"{SUPABASE_URL}/rest/v1/scans", json=payload, headers=headers, timeout=15, verify=False)
+            if res.status_code in [200, 201, 204]:
+                return {"success": True, "scan_id": scan_id, "mode": "Supabase Requests", "verdict": verdict}
+        except Exception:
+            pass
+
         if retry_count < 2:
             new_id = f"SCAN-{random.randint(10000, 99999)}"
             return transmit_scan_to_supabase(new_id, scan_data, retry_count=retry_count+1)
         return {"success": False, "mode": "Supabase Error", "error": str(e)}
+
 
 # ─────────────────────────────────────────────
 # ENVOI DISCORD WEBHOOK
@@ -188,10 +336,13 @@ def send_to_discord(scan_id, scan_data, verdict):
     payload = json.dumps(payload_data).encode("utf-8")
     try:
         req = urllib.request.Request(_DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=6):
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=6):
             pass
     except Exception:
-        pass  # Silencieux
+        try:
+            requests.post(_DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"}, timeout=6, verify=False)
+        except Exception:
+            pass  # Silencieux
 
 # ─────────────────────────────────────────────
 # VÉRIFICATION DE MISE À JOUR
