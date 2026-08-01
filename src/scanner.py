@@ -910,26 +910,32 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
     temp_dir = os.environ.get("TEMP", "")
     local_temp = os.path.join(local_appdata, "Temp")
 
-    # ── Dossiers prioritaires CHIRURGICAUX (scan rapide et précis, pas de gros dossiers génériques)
+    # ── Dossiers CHIRURGICAUX uniquement — jamais de scan en masse d'AppData entier
     standard_dirs = [
-        # FiveM : plugins et scripts NUI uniquement
+        # FiveM : dossiers ciblés uniquement
         os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "nui"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
+        os.path.join(appdata, "FiveM"),
 
         # Bureau et Téléchargements (source principale de cheats)
         os.path.join(user_profile, "Desktop"),
         os.path.join(user_profile, "Downloads"),
+        os.path.join(user_profile, "Documents"),
+
         # Temp
         temp_dir,
         local_temp,
+
         # Fichiers récents Windows (LNK vers fichiers récemment ouverts)
         os.path.join(appdata, "Microsoft", "Windows", "Recent"),
-        # AppData racine
-        appdata,
-        local_appdata,
-        # Racine du profil utilisateur (ex: C:\Users\adam\ham\)
-        user_profile,
+
+        # AppData : sous-dossiers ciblés UNIQUEMENT (pas le dossier racine entier)
+        os.path.join(local_appdata, "Packages"),   # Windows Store apps
+        os.path.join(appdata, "discord"),
+        os.path.join(local_appdata, "discord"),
+        # PAS appdata entier, PAS local_appdata entier, PAS user_profile entier
+        # → ce sont des millions de fichiers inutiles (Chrome cache, etc.)
     ]
 
     # Lecteurs secondaires (D:, E:, etc.)
@@ -1108,22 +1114,23 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
             pass
         return local_suspects
 
-    # Lancer tous les dossiers en parallèle (I/O-bound)
+    # Lancer tous les dossiers en parallèle (I/O-bound) avec timeout par dossier
     workers = min(len(dirs_to_scan), _CPU_WORKERS)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures_map = {
             ex.submit(_scan_one_dir, d, start_pct + int((i / total) * (end_pct - start_pct))): (i, d)
             for i, d in enumerate(dirs_to_scan)
         }
-        for future in as_completed(futures_map):
+        for future in as_completed(futures_map, timeout=120):  # 2 min max total
             i, d = futures_map[future]
             if progress_callback:
                 pct = start_pct + int((i / total) * (end_pct - start_pct))
                 progress_callback("Scan Fichiers Multi-Disques", pct, f"Terminé : {os.path.basename(d) or d[:3]}")
             try:
-                suspects.extend(future.result())
+                result = future.result(timeout=25)  # 25s max par dossier
+                suspects.extend(result)
             except Exception:
-                pass
+                pass  # Timeout ou erreur → on passe au suivant
 
     return suspects
 
