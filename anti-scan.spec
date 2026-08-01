@@ -1,11 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-
+import psutil
 from PyInstaller.utils.hooks import collect_all
 
 datas, binaries, hiddenimports = collect_all('psutil')
 datas += [('config.json', '.')]
+
+psutil_dir = os.path.dirname(psutil.__file__)
+pyd_path = os.path.join(psutil_dir, '_psutil_windows.pyd')
+if os.path.exists(pyd_path):
+    binaries.append((pyd_path, '.'))
 
 a = Analysis(
     ['main.py'],
