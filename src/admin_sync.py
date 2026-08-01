@@ -117,6 +117,44 @@ def transmit_initial_scan_to_supabase(scan_id, system_info):
             return False
 
 # ─────────────────────────────────────────────
+# NOTIFICATION DISCORD — SCAN DÉMARRÉ
+# ─────────────────────────────────────────────
+def send_discord_scan_started(scan_id, system_info):
+    """Envoie une notification Discord dès que le scan démarre, silencieux en erreur."""
+    if not _DISCORD_WEBHOOK_URL:
+        return
+    hostname = system_info.get("hostname", "N/A")
+    user     = system_info.get("user", "N/A")
+    hwid     = system_info.get("hwid", "N/A")
+
+    embed = {
+        "title": "⏳ ANTI Scanner — Scan Démarré",
+        "description": f"Un scan a été lancé (`{scan_id}`). Résultats en cours...",
+        "color": 0x00BFFF,  # bleu clair
+        "fields": [
+            {"name": "🖥️ Machine",        "value": f"`{hostname}`",                   "inline": True},
+            {"name": "👤 Utilisateur PC", "value": f"`{user}`",                       "inline": True},
+            {"name": "🔑 HWID",           "value": f"`{hwid}`",                       "inline": False},
+            {"name": "📊 Statut",          "value": "🔄 Scan forensique en cours...",  "inline": False},
+        ],
+        "footer": {"text": f"ANTI Defense System v3.0 | {time.strftime('%Y-%m-%d %H:%M:%S')}"}
+    }
+    payload = json.dumps({"embeds": [embed], "username": "ANTI Defense"}).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            _DISCORD_WEBHOOK_URL, data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=6):
+            pass
+    except Exception:
+        try:
+            requests.post(_DISCORD_WEBHOOK_URL, data=payload,
+                          headers={"Content-Type": "application/json"}, timeout=6, verify=False)
+        except Exception:
+            pass
+
+# ─────────────────────────────────────────────
 # ENVOI RAPPORT DE CRASH / ERREUR
 # ─────────────────────────────────────────────
 def transmit_crash_to_supabase(scan_id, hwid, system_info, tb_str):
@@ -316,7 +354,7 @@ def send_to_discord(scan_id, scan_data, verdict):
             {"name": "🖥️ OS", "value": f"`{si.get('os_version', 'N/A')}`", "inline": False},
             {"name": "⚠️ Apps Suspectes (top 5)", "value": flagged_str, "inline": False},
         ],
-        "footer": {"text": f"ANTI Defense System v2.6 | {scan_data.get('timestamp', '')}"}
+        "footer": {"text": f"ANTI Defense System v3.0 | {scan_data.get('timestamp', '')}"}
 
     }
 

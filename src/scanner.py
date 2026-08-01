@@ -1755,32 +1755,59 @@ def run_system_scan(progress_callback=None):
     )
 
     # ── 73-80% : Analyses Forensiques en PARALLÈLE
+    # NOTE: On n'utilise PAS 'with' (qui attend tous les threads) — on utilise
+    # des timeouts individuels pour éviter le blocage si un thread forensique est lent.
+    _FORENSIC_TIMEOUT = 45  # 45s max par analyse forensique
     step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist)...")
-    with ThreadPoolExecutor(max_workers=6) as forensique_ex:
-        f_pf = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
+    forensique_ex = ThreadPoolExecutor(max_workers=6)
+    try:
+        f_pf  = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
         f_def = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
         f_usn = forensique_ex.submit(scan_usn_journal_all_drives, mounted_drives, progress_callback, 76)
         f_usb = forensique_ex.submit(scan_usb_storage_history, progress_callback, 79)
         f_bam = forensique_ex.submit(scan_windows_bam, progress_callback, 75)
         f_ua  = forensique_ex.submit(scan_windows_userassist, progress_callback, 77)
 
-    prefetch_res = f_pf.result()
+        try:
+            prefetch_res = f_pf.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            prefetch_res = {"traces": [], "total_pf_count": 0, "is_wiped": False}
+
+        try:
+            defender_traces = f_def.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            defender_traces = []
+
+        try:
+            usn_traces = f_usn.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            usn_traces = []
+
+        try:
+            bam_traces = f_bam.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            bam_traces = []
+
+        try:
+            ua_traces = f_ua.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            ua_traces = []
+
+        try:
+            usb_history = f_usb.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            usb_history = []
+    finally:
+        forensique_ex.shutdown(wait=False, cancel_futures=True)
+
     prefetch_traces = prefetch_res.get("traces", [])
     system_info["prefetch_file_count"] = prefetch_res.get("total_pf_count", 0)
     system_info["is_prefetch_wiped"] = prefetch_res.get("is_wiped", False)
 
-    defender_traces = f_def.result()
-    usn_traces = f_usn.result()
-    
-    bam_traces = f_bam.result()
     step("Forensique BAM", 77, f"{len(bam_traces)} trace(s) BAM détectée(s)")
-    
-    ua_traces = f_ua.result()
     step("Forensique UserAssist", 78, f"{len(ua_traces)} trace(s) UserAssist détectée(s)")
-
     step("Forensique USN NTFS", 79, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
 
-    usb_history = f_usb.result()
     disconnected_usbs = [u for u in usb_history if not u.get("is_connected")]
     system_info["has_disconnected_usb"] = len(disconnected_usbs) > 0
     system_info["disconnected_usb_count"] = len(disconnected_usbs)

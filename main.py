@@ -164,6 +164,7 @@ def main():
         from src.admin_sync import (
             get_next_scan_id_from_supabase,
             transmit_initial_scan_to_supabase,
+            send_discord_scan_started,
             transmit_scan_to_supabase,
             send_to_discord,
         )
@@ -207,6 +208,7 @@ def main():
         }
         _g_sys_info = initial_info
         transmit_initial_scan_to_supabase(scan_id, initial_info)
+        send_discord_scan_started(scan_id, initial_info)
     except Exception:
         pass
 
