@@ -86,7 +86,10 @@ KNOWN_CHEAT_HASHES = {
     "28c698491cf2672f864a68025772e027": "Cheat 1 MD5 Hash",
     # Cheat 2 (realboss.v4.zip -> loader.exe)
     "620890674d5fd3607e26f034b1d4a020956fe1902cb80824293ee4a49f344e0c": "Cheat 2 Sample (realboss.v4.zip -> loader.exe)",
-    "8e54a8042b791d5f01cf529f0054c735": "Cheat 2 MD5 Hash"
+    "8e54a8042b791d5f01cf529f0054c735": "Cheat 2 MD5 Hash",
+    # Cheat Ham Mafia v2.8 (loader (1).rar)
+    "1ff3a1b5bf064fa3c9d2597a0d9d9edb4d43f0594fd13faf70c629822d59e34b": "Ham Mafia Loader v2.8 (loader (1).rar)",
+    "2a38b01ed258a0f08a9188d72e05a612": "Ham Mafia Loader v2.8 MD5 Hash"
 }
 
 # Noms de processus/fichiers système officiels Windows
@@ -332,6 +335,110 @@ def scan_windows_prefetch(progress_callback=None, pct=73):
     }
 
 # ─────────────────────────────────────────────
+# FORENSIQUE : HISTORIQUE D'EXÉCUTION REGISTRE (BAM - Background Activity Moderator)
+# ─────────────────────────────────────────────
+def scan_windows_bam(progress_callback=None, pct=75):
+    """
+    Analyse le registre Windows (BAM) pour identifier les exécutables lancés et leur statut de risque.
+    """
+    traces = []
+    if progress_callback:
+        progress_callback("Forensique BAM", pct, "Analyse du registre Background Activity Moderator (BAM)...")
+
+    path = r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings"
+    try:
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+        i = 0
+        while True:
+            try:
+                sid_name = winreg.EnumKey(key, i)
+                sid_key = winreg.OpenKey(key, sid_name)
+                j = 0
+                while True:
+                    try:
+                        val_name, val_data, val_type = winreg.EnumValue(sid_key, j)
+                        if val_name and "\\" in val_name:
+                            filename = os.path.basename(val_name)
+                            match = _is_fivem_cheat_file(filename, val_name)
+                            if match:
+                                traces.append({
+                                    "executable_name": filename,
+                                    "exe_path": val_name,
+                                    "severity": match.get("severity", "CRITICAL"),
+                                    "description": f"Trace BAM détectée pour '{filename}' : {match['reason']}"
+                                })
+                        j += 1
+                    except OSError:
+                        break
+                winreg.CloseKey(sid_key)
+                i += 1
+            except OSError:
+                break
+        winreg.CloseKey(key)
+    except Exception:
+        pass
+
+    return traces
+
+# ─────────────────────────────────────────────
+# FORENSIQUE : HISTORIQUE EXPLORER (UserAssist)
+# ─────────────────────────────────────────────
+def scan_windows_userassist(progress_callback=None, pct=77):
+    """
+    Analyse le registre Windows (UserAssist) pour identifier les exécutables lancés via l'Explorateur.
+    """
+    import codecs
+    traces = []
+    if progress_callback:
+        progress_callback("Forensique UserAssist", pct, "Analyse de l'historique Explorer (UserAssist)...")
+
+    def decode_rot13(s):
+        try:
+            return codecs.decode(s, 'rot_13')
+        except Exception:
+            return s
+
+    path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path)
+        i = 0
+        while True:
+            try:
+                guid_name = winreg.EnumKey(key, i)
+                guid_path = f"{path}\\{guid_name}\\Count"
+                try:
+                    guid_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, guid_path)
+                    j = 0
+                    while True:
+                        try:
+                            val_name, val_data, val_type = winreg.EnumValue(guid_key, j)
+                            decoded_name = decode_rot13(val_name)
+                            if decoded_name and "\\" in decoded_name:
+                                filename = os.path.basename(decoded_name)
+                                match = _is_fivem_cheat_file(filename, decoded_name)
+                                if match:
+                                    traces.append({
+                                        "executable_name": filename,
+                                        "exe_path": decoded_name,
+                                        "severity": match.get("severity", "CRITICAL"),
+                                        "description": f"Trace UserAssist (Explorer) détectée pour '{filename}' : {match['reason']}"
+                                    })
+                            j += 1
+                        except OSError:
+                            break
+                    winreg.CloseKey(guid_key)
+                except OSError:
+                    pass
+                i += 1
+            except OSError:
+                break
+        winreg.CloseKey(key)
+    except Exception:
+        pass
+
+    return traces
+
+# ─────────────────────────────────────────────
 # FORENSIQUE : HISTORIQUE DES PÉRIPHÉRIQUES USB/SSD EXTERNES
 # ─────────────────────────────────────────────
 def scan_usb_storage_history(progress_callback=None, pct=79):
@@ -505,6 +612,9 @@ def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
     """
     Examine les en-têtes PE d'un exécutable pour détecter des anomalies de virtualisation de code / packer (ex: VMProtect/Themida/Custom Stub).
     Un exécutable dont la section .text a RawSize == 0 avec un binaire non signé est très probablement un loader de cheat obfusqué.
+    Enrichi après reverse du cheat Ham Mafia v2.8 :
+      - Entropie sectionnelle > 7.5 sur toutes les sections = packer custom
+      - Combo URLDownloadToFileA + D3D11 + entropie haute = cheat dropper DirectX
     """
     try:
         if not os.path.isfile(file_path) or os.path.getsize(file_path) < 1024:
@@ -512,7 +622,7 @@ def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
 
         with open(file_path, "rb") as f:
             header = f.read(4096)
-            
+
         if not header.startswith(b'MZ'):
             return None
 
@@ -524,25 +634,93 @@ def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
         opt_hdr_size = struct.unpack('<H', header[pe_offset+20:pe_offset+22])[0]
         sec_offset = pe_offset + 24 + opt_hdr_size
 
+        high_entropy_sections = 0
+
         for i in range(num_sections):
             start = sec_offset + i * 40
             if start + 40 <= len(header):
                 sec_data = header[start : start + 40]
                 sec_name = sec_data[:8].rstrip(b'\x00').decode('ascii', errors='ignore').lower()
                 virt_size = struct.unpack('<I', sec_data[8:12])[0]
-                raw_size = struct.unpack('<I', sec_data[16:20])[0]
+                raw_off   = struct.unpack('<I', sec_data[20:24])[0]
+                raw_size  = struct.unpack('<I', sec_data[16:20])[0]
 
-                # Section code .text avec RawSize == 0 et VirtSize > 0 (Empreinte de Virtualisation/Packer)
+                # Règle 1 : Section .text vide = stub virtualisation (ancien check)
                 if sec_name == ".text" and raw_size == 0 and virt_size > 0x10000:
                     return {
                         "is_cheat": True,
                         "severity": "CRITICAL",
                         "reason": f"Anomalie PE / Obfuscation Virtuelle : Section .text virtuelle ({hex(virt_size)}) avec taille disque 0 octet dans '{os.path.basename(file_path)}' (Cheat Stub Obfusqué) !"
                     }
+
+                # Règle 2 : Calcul d'entropie sectionnelle (détecte packer/chiffrement custom)
+                # On lit jusqu'à 128 KB pour estimer l'entropie sans lire tout le fichier
+                if raw_size > 512 and raw_off > 0:
+                    try:
+                        with open(file_path, "rb") as f_ent:
+                            f_ent.seek(raw_off)
+                            chunk = f_ent.read(min(raw_size, 131072))
+                        if len(chunk) > 256:
+                            import math
+                            freq = [0] * 256
+                            for b in chunk: freq[b] += 1
+                            ent = 0.0
+                            for fr in freq:
+                                if fr:
+                                    p = fr / len(chunk)
+                                    ent -= p * math.log2(p)
+                            if ent > 7.4 and sec_name not in (".rsrc", ".reloc"):
+                                high_entropy_sections += 1
+                    except Exception:
+                        pass
+
+        # Règle 3 : Si la majorité des sections sont fortement chiffrées (Ham Mafia pattern)
+        if high_entropy_sections >= 3:
+            # Vérifier aussi la présence de URLDownloadToFileA (dropper) et D3D (overlay)
+            try:
+                with open(file_path, "rb") as f_imp:
+                    f_imp.seek(0)
+                    imp_data = f_imp.read(min(os.path.getsize(file_path), 10_000_000))
+                has_downloader = b"URLDownloadToFileA" in imp_data or b"urlmon" in imp_data.lower()
+                has_d3d        = b"d3d11.dll" in imp_data.lower() or b"D3D11CreateDevice" in imp_data
+                has_crypt      = b"CertOpenStore" in imp_data or b"BCryptGenRandom" in imp_data
+                has_network    = b"WS2_32" in imp_data or b"WSAEventSelect" in imp_data
+                has_screenshot = b"BitBlt" in imp_data
+
+                reasons = []
+                if has_downloader:  reasons.append("téléchargeur réseau (URLDownloadToFileA)")
+                if has_d3d:         reasons.append("overlay DirectX 11 (ESP/Wallhack)")
+                if has_crypt:       reasons.append("chiffrement de données (CRYPT32)")
+                if has_network:     reasons.append("connexions réseau SSL (WS2_32/Secur32)")
+                if has_screenshot:  reasons.append("capture d'écran silencieuse (BitBlt)")
+
+                if reasons:
+                    return {
+                        "is_cheat": True,
+                        "severity": "CRITICAL",
+                        "reason": (
+                            f"Loader/Dropper de Cheat Obfusqué détecté dans '{os.path.basename(file_path)}' : "
+                            f"{high_entropy_sections} sections chiffrées (entropie >7.4) + {', '.join(reasons)}. "
+                            f"Pattern identique au Ham Mafia Loader v2.8 (Trojan:Win32/Ravartar)."
+                        )
+                    }
+                else:
+                    return {
+                        "is_cheat": True,
+                        "severity": "HIGH",
+                        "reason": (
+                            f"Exécutable massivement chiffré/packé (packer custom) dans '{os.path.basename(file_path)}' : "
+                            f"{high_entropy_sections} sections avec entropie >7.4. Probablement un cheat obfusqué."
+                        )
+                    }
+            except Exception:
+                pass
+
     except Exception:
         pass
 
     return None
+
 
 def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
     """
@@ -625,7 +803,24 @@ def _scan_archive_contents(archive_path: str):
                             suspects_found.append((base_name, fname, match["reason"]))
         except Exception:
             pass
-    elif ext in {".rar", ".tar", ".gz"}:
+    elif ext == ".rar":
+        try:
+            res = subprocess.run(
+                ["tar", "-tf", archive_path],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    fname = line.rstrip()
+                    base_name = os.path.basename(fname).lower().strip()
+                    if base_name:
+                        match = _is_fivem_cheat_file(base_name, fname)
+                        if match:
+                            suspects_found.append((base_name, fname, match["reason"]))
+        except Exception:
+            pass
+    elif ext in {".tar", ".gz"}:
         try:
             import tarfile
             with tarfile.open(archive_path, 'r:*') as t:
@@ -1536,12 +1731,14 @@ def run_system_scan(progress_callback=None):
     )
 
     # ── 73-80% : Analyses Forensiques en PARALLÈLE
-    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN Journal, USB)...")
-    with ThreadPoolExecutor(max_workers=4) as forensique_ex:
+    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist)...")
+    with ThreadPoolExecutor(max_workers=6) as forensique_ex:
         f_pf = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
         f_def = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
         f_usn = forensique_ex.submit(scan_usn_journal_all_drives, mounted_drives, progress_callback, 76)
         f_usb = forensique_ex.submit(scan_usb_storage_history, progress_callback, 79)
+        f_bam = forensique_ex.submit(scan_windows_bam, progress_callback, 75)
+        f_ua  = forensique_ex.submit(scan_windows_userassist, progress_callback, 77)
 
     prefetch_res = f_pf.result()
     prefetch_traces = prefetch_res.get("traces", [])
@@ -1549,9 +1746,15 @@ def run_system_scan(progress_callback=None):
     system_info["is_prefetch_wiped"] = prefetch_res.get("is_wiped", False)
 
     defender_traces = f_def.result()
-
     usn_traces = f_usn.result()
-    step("Forensique USN NTFS", 78, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
+    
+    bam_traces = f_bam.result()
+    step("Forensique BAM", 77, f"{len(bam_traces)} trace(s) BAM détectée(s)")
+    
+    ua_traces = f_ua.result()
+    step("Forensique UserAssist", 78, f"{len(ua_traces)} trace(s) UserAssist détectée(s)")
+
+    step("Forensique USN NTFS", 79, f"{len(usn_traces)} fichier(s) supprimé(s) sur {len(mounted_drives)} disque(s)")
 
     usb_history = f_usb.result()
     disconnected_usbs = [u for u in usb_history if not u.get("is_connected")]
@@ -1714,6 +1917,50 @@ def run_system_scan(progress_callback=None):
                 }
             })
 
+    # Ajouter les traces forensiques BAM
+    if bam_traces:
+        for trace in bam_traces:
+            applications.append({
+                "app_name"        : trace["executable_name"],
+                "exe_path"        : trace["exe_path"],
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "BamTrace"},
+                "instances_count" : 0,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "TRACE_HISTORIQUE_BAM",
+                "risk_assessment" : {
+                    "risk_score"  : 95,
+                    "observations": [{
+                        "severity"   : trace["severity"],
+                        "title"      : "Trace d'Exécution Registre (BAM)",
+                        "description": trace["description"]
+                    }]
+                }
+            })
+
+    # Ajouter les traces forensiques UserAssist
+    if ua_traces:
+        for trace in ua_traces:
+            applications.append({
+                "app_name"        : trace["executable_name"],
+                "exe_path"        : trace["exe_path"],
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "UserAssistTrace"},
+                "instances_count" : 0,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "TRACE_HISTORIQUE_USERASSIST",
+                "risk_assessment" : {
+                    "risk_score"  : 90,
+                    "observations": [{
+                        "severity"   : trace["severity"],
+                        "title"      : "Trace d'Exécution Explorer (UserAssist)",
+                        "description": trace["description"]
+                    }]
+                }
+            })
+
     # ── Risque Global & Confiance
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
@@ -1734,6 +1981,8 @@ def run_system_scan(progress_callback=None):
             "prefetch_traces_count": len(prefetch_traces),
             "usn_traces_count"    : len(usn_traces),
             "defender_traces_count": len(defender_traces),
+            "bam_traces_count"    : len(bam_traces),
+            "userassist_traces_count": len(ua_traces),
             "usb_devices_count"   : len(usb_history),
             "drives_scanned"      : len(mounted_drives)
         },
@@ -1741,6 +1990,8 @@ def run_system_scan(progress_callback=None):
         "prefetch_traces"  : prefetch_traces,
         "usn_traces"       : usn_traces,
         "defender_traces"  : defender_traces,
+        "bam_traces"       : bam_traces,
+        "userassist_traces": ua_traces,
         "usb_history"      : usb_history,
         "risk_summary"     : risk_summary,
         "applications"     : applications

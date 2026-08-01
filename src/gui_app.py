@@ -4,7 +4,7 @@ import threading
 import time
 
 # ══════════════════════════════════════════════
-#  ANTI DEFENSE SYSTEM — Terminal UI v2.7
+#  ANTI DEFENSE SYSTEM — Terminal UI v2.8
 #  Style : terminal neon, sans barre Windows
 #  Features : Always on Top, Mini Widget Mode
 # ══════════════════════════════════════════════
@@ -68,7 +68,7 @@ class AntiScanGUI:
         self.title_bar.pack(fill=tk.X)
         self.title_bar.pack_propagate(False)
 
-        tk.Label(self.title_bar, text=" ANTI DEFENSE SYSTEM  v2.7",
+        tk.Label(self.title_bar, text=" ANTI DEFENSE SYSTEM  v2.8",
                  font=("Consolas", 9, "bold"),
                  fg=NEON, bg=GRAY_DIM).pack(side=tk.LEFT, padx=8, pady=5)
 
@@ -96,7 +96,7 @@ class AntiScanGUI:
             "=========================================================================\n"
             "   ██████╗   ███╗  ██╗  ████████╗  ██╗      🛡  ANTI DEFENSE SYSTEM\n"
             "  ██╔══██╗  ████╗ ██║  ╚══██╔══╝  ██║         System Integrity & Telemetry Scanner\n"
-            "  ███████║  ██╔██╗██║     ██║     ██║         Version 2.7  (MAJESTIC)\n"
+            "  ███████║  ██╔██╗██║     ██║     ██║         Version 2.8  (MAJESTIC)\n"
             "  ██╔══██║  ██║╚████║     ██║     ██║         100% Defensive Security Engine\n"
             "  ██║  ██║  ██║ ╚███║     ██║     ██║\n"
             "  ╚═╝  ╚═╝  ╚═╝  ╚══╝    ╚═╝     ╚═╝\n"

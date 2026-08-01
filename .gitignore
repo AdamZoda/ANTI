@@ -7,20 +7,20 @@ venv/
 
 # PyInstaller / Build outputs
 build/
-*.spec
 dist/*
-!dist/ANTI.exe
 !dist/anti-scan.exe
-!dist/config.json
 
-# Config local
+# Config local (contient des clés privées)
 config.json
 scans_admin/
+
+# Artefacts erronés créés à la racine
+%TEMP%/
 
 # Web (repo séparé)
 web/
 
-# Server
+# Server (repo séparé)
 server/
 
 # IDE
@@ -34,3 +34,6 @@ Thumbs.db
 
 # Env
 .env
+
+# Spec obsolète
+ANTI.spec
