@@ -1,33 +1,41 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-import psutil
-from PyInstaller.utils.hooks import collect_all
+import sys
 
-datas, binaries, hiddenimports = collect_all('psutil')
-datas += [('config.json', '.')]
+# Localiser le dossier psutil pour forcer l'inclusion de son .pyd natif
+psutil_dir = None
+for p in sys.path:
+    candidate = os.path.join(p, 'psutil')
+    if os.path.isdir(candidate):
+        psutil_dir = candidate
+        break
 
-psutil_dir = os.path.dirname(psutil.__file__)
-pyd_path = os.path.join(psutil_dir, '_psutil_windows.pyd')
-if os.path.exists(pyd_path):
-    binaries.append((pyd_path, '.'))
+# Construire la liste des binaires psutil (.pyd) à forcer dans le bundle
+psutil_binaries = []
+if psutil_dir:
+    for f in os.listdir(psutil_dir):
+        if f.endswith('.pyd') or f.endswith('.dll'):
+            psutil_binaries.append((os.path.join(psutil_dir, f), 'psutil'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=psutil_binaries,
+    datas=[('config.json', '.')],
+    hiddenimports=[
+        'psutil',
+        'psutil._pswindows',
+        'psutil._psutil_windows',
+        'psutil._common',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['tkinter', '_tkinter', 'tk', 'tcl'],
     noarchive=False,
     optimize=0,
 )
-
-# Exclure python3.dll (DLL de redirection qui fait echouer LoadLibrary dans _MEIxxxx sur Windows)
-a.binaries = [x for x in a.binaries if x[0].lower() != 'python3.dll']
 
 pyz = PYZ(a.pure)
 
@@ -45,7 +53,7 @@ exe = EXE(
     strip=False,
     upx=False,
     upx_exclude=[],
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

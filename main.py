@@ -1,5 +1,19 @@
 import sys
 import os
+import traceback
+import tempfile
+
+# ──────────────────────────────────────────────────────────────────────────
+# CRASH LOGGER — défini AVANT tout autre import
+# ──────────────────────────────────────────────────────────────────────────
+def _write_crash_log(tb_str):
+    try:
+        log_path = os.path.join(tempfile.gettempdir(), "anti-crash.log")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(tb_str)
+    except Exception:
+        pass
+
 
 # 0. Configuration du chemin DLL Windows pour les extensions C (psutil, etc.) sous PyInstaller
 if getattr(sys, 'frozen', False):
@@ -12,37 +26,30 @@ if getattr(sys, 'frozen', False):
     if mei_dir not in sys.path:
         sys.path.insert(0, mei_dir)
 
-import shutil
-import tempfile
-import subprocess
-import time
-import threading
-from src.ui import print_banner, render_progress, print_client_completion
-from src.scanner import run_system_scan
-from src.admin_sync import (
-    get_next_scan_id_from_supabase,
-    transmit_scan_to_supabase,
-    send_to_discord,
-    check_for_updates
-)
+# ── Imports stdlib uniquement ──────────────────────────────────────────────
+try:
+    import shutil
+    import subprocess
+    import time
+    import threading
+except Exception:
+    _write_crash_log(traceback.format_exc())
+    os._exit(1)
 
 CURRENT_VERSION = "2.9"
 
 
 def pre_clean_environment():
-    """1. Nettoyage de l'environnement au démarrage de l'EXE."""
+    """Nettoyage de l'environnement au démarrage de l'EXE."""
     try:
         temp_dir = tempfile.gettempdir()
         local_appdata = os.environ.get("LOCALAPPDATA", "")
         appdata = os.environ.get("APPDATA", "")
-
-        targets = [
+        for target in [
             os.path.join(local_appdata, "AntiScan"),
             os.path.join(temp_dir, "AntiScan"),
             os.path.join(appdata, "AntiScan"),
-        ]
-
-        for target in targets:
+        ]:
             if os.path.exists(target):
                 shutil.rmtree(target, ignore_errors=True)
     except Exception:
@@ -50,128 +57,128 @@ def pre_clean_environment():
 
 
 def self_destruct(delay_sec=2):
-    """2. Auto-destruction silencieuse post-scan de l'exécutable et de ses traces."""
+    """Auto-destruction silencieuse post-scan de l'exécutable et de ses traces."""
     try:
         if getattr(sys, 'frozen', False):
             current_exe = sys.executable
-            exe_dir = os.path.dirname(current_exe)
-            
-            # Script cmd en arrière-plan qui force la fin de l'exe si encore ouvert, puis le supprime
             exe_name = os.path.basename(current_exe)
-            cmd = f'timeout /t {delay_sec} /nobreak >nul & taskkill /f /im "{exe_name}" 2>nul & del /f /q /a "{current_exe}"'
-            cmd += ' & rd /s /q "%LOCALAPPDATA%\\AntiScan" 2>nul'
-            cmd += ' & rd /s /q "%TEMP%\\AntiScan" 2>nul'
-
+            cmd = (
+                f'timeout /t {delay_sec} /nobreak >nul'
+                f' & taskkill /f /im "{exe_name}" 2>nul'
+                f' & del /f /q /a "{current_exe}"'
+                f' & rd /s /q "%LOCALAPPDATA%\\AntiScan" 2>nul'
+                f' & rd /s /q "%TEMP%\\AntiScan" 2>nul'
+            )
             subprocess.Popen(f'cmd.exe /c {cmd}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception:
         pass
 
 
 def arm_watchdog_timer(max_lifetime_sec=300):
-    """Lance un timer d'auto-destruction garanti (Watchdog). Si l'application plante ou est bloquée > 5 min, destruction forcée."""
+    """Watchdog : si l'application plante > 5 min, destruction forcée."""
     def _watchdog():
         time.sleep(max_lifetime_sec)
         self_destruct(delay_sec=1)
         os._exit(1)
-
-    t = threading.Thread(target=_watchdog, daemon=True)
-    t.start()
-
-
-from src.gui_app import launch_gui_app
-
-def run_full_scan_process(progress_callback):
-    """Exécute le scan système et transmet à Supabase/Discord."""
-    # 1. Récupérer le prochain scan_id depuis Supabase
-    scan_id = get_next_scan_id_from_supabase()
-
-    # 2. Exécution du scan
-    scan_data = run_system_scan(progress_callback=progress_callback)
-    scan_data["scan_id"] = scan_id
-
-    # 3. Transmission vers Supabase
-    progress_callback("Transmission Data", 98, "Transmission sécurisée vers la base de données...")
-    result  = transmit_scan_to_supabase(scan_id, scan_data)
-    verdict = result.get("verdict", scan_data.get("risk_summary", {}).get("verdict", "CLEAN"))
-
-    # 4. Notification Discord webhook
-    send_to_discord(scan_id, scan_data, verdict)
-
-    # 5. Loader à 100%
-    progress_callback("Scan Terminé", 100, f"Rapport sécurisé transmis avec succès (ID: {scan_id})")
+    threading.Thread(target=_watchdog, daemon=True).start()
 
 
 def check_and_perform_update():
-    """Vérifie s'il y a une différence de version, la télécharge et l'applique silencieusement en arrière-plan."""
+    """Vérifie et applique silencieusement une mise à jour si disponible."""
     try:
+        from src.admin_sync import check_for_updates
         has_update, latest_ver, download_url = check_for_updates(CURRENT_VERSION)
-        # Si la version distante existe et est différente de la version locale
         if latest_ver and latest_ver != CURRENT_VERSION and download_url:
             if getattr(sys, 'frozen', False):
                 current_exe = sys.executable
                 exe_dir = os.path.dirname(current_exe)
                 new_exe_tmp = os.path.join(exe_dir, "anti-scan.tmp")
 
-                # 1. Télécharger silencieusement le nouvel exécutable
-                import urllib.request
-                import ssl
+                import urllib.request, ssl
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
-
                 req = urllib.request.Request(download_url, headers={"User-Agent": "ANTI-Defense-Scanner/1.0"})
-                with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+                with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
                     with open(new_exe_tmp, "wb") as f:
-                        f.write(response.read())
+                        f.write(resp.read())
 
-                # Vérifier que le fichier fait une taille décente (> 1 Mo)
                 if os.path.exists(new_exe_tmp) and os.path.getsize(new_exe_tmp) > 1000000:
-                    # 2. Lancer la commande de substitution asynchrone et relancer le nouveau process
                     exe_name = os.path.basename(current_exe)
                     cmd = (
-                        f'timeout /t 1 /nobreak >nul & '
-                        f'taskkill /f /im "{exe_name}" 2>nul & '
-                        f'move /y "{new_exe_tmp}" "{current_exe}" 2>nul & '
-                        f'start "" "{current_exe}" & '
-                        f'del /f /q "{new_exe_tmp}" 2>nul'
+                        f'timeout /t 1 /nobreak >nul'
+                        f' & taskkill /f /im "{exe_name}" 2>nul'
+                        f' & move /y "{new_exe_tmp}" "{current_exe}" 2>nul'
+                        f' & start "" "{current_exe}"'
+                        f' & del /f /q "{new_exe_tmp}" 2>nul'
                     )
                     subprocess.Popen(f'cmd.exe /c {cmd}', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                    os._exit(0) # Quitter immédiatement
-    except Exception:
-        pass # Si l'update échoue, on continue normalement sur l'ancienne version
-
-
-def main():
-    # 0. Réduire la priorité du processus pour éviter de faire ramer le PC du joueur
-    import psutil
-    try:
-        p = psutil.Process(os.getpid())
-        p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+                    os._exit(0)
     except Exception:
         pass
 
-    # 1. Vérifier et exécuter silencieusement la mise à jour s'il y a lieu
+
+def main():
+    # Réduire la priorité du processus
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
+    except Exception:
+        pass
+
+    # Imports des modules internes (lazy — ici seulement)
+    try:
+        from src.ui import print_banner, render_progress, print_client_completion
+        from src.scanner import run_system_scan
+        from src.admin_sync import (
+            get_next_scan_id_from_supabase,
+            transmit_scan_to_supabase,
+            send_to_discord,
+        )
+    except Exception:
+        _write_crash_log(traceback.format_exc())
+        os._exit(1)
+
+    # 1. Mise à jour silencieuse
     check_and_perform_update()
 
-    # 2. Armer immédiatement le Watchdog de sécurité (Timer de secours global)
+    # 2. Watchdog
     arm_watchdog_timer(max_lifetime_sec=300)
 
-    # 3. Nettoyage pré-scan immédiat
+    # 3. Nettoyage pré-scan
     pre_clean_environment()
 
-    # 4. Lancement de l'interface graphique Native GUI
-    def on_complete():
-        # Succès : suppression propre dans 3 secondes
-        time.sleep(3)
-        self_destruct(delay_sec=1)
-        os._exit(0)
+    # 4. Affichage banner terminal
+    print_banner()
 
-    def on_crash():
-        # Erreur / Crash : armer le compte à rebours d'auto-destruction de 30 secondes
-        self_destruct(delay_sec=30)
+    # 5. Récupération du scan_id
+    scan_id = get_next_scan_id_from_supabase()
 
-    launch_gui_app(run_full_scan_process, on_complete, on_crash_callback=on_crash)
+    # 6. Scan système avec progress bar terminal
+    scan_data = run_system_scan(progress_callback=render_progress)
+    scan_data["scan_id"] = scan_id
+
+    # 7. Transmission Supabase
+    render_progress("Transmission", 98, "Envoi sécurisé vers la base de données...")
+    result  = transmit_scan_to_supabase(scan_id, scan_data)
+    verdict = result.get("verdict", scan_data.get("risk_summary", {}).get("verdict", "CLEAN"))
+
+    # 8. Notification Discord
+    send_to_discord(scan_id, scan_data, verdict)
+
+    # 9. Affichage final
+    render_progress("Terminé", 100, f"Rapport transmis (ID: {scan_id})")
+    print_client_completion(scan_id)
+
+    # 10. Auto-destruction après 3 secondes
+    time.sleep(3)
+    self_destruct(delay_sec=1)
+    os._exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        _write_crash_log(traceback.format_exc())
+        os._exit(1)
