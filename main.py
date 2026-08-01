@@ -14,7 +14,7 @@ from src.admin_sync import (
     check_for_updates
 )
 
-CURRENT_VERSION = "2.8"
+CURRENT_VERSION = "2.9"
 
 
 def pre_clean_environment():

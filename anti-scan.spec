@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -29,7 +31,7 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'AntiScan', 'pyi'),
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
