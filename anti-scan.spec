@@ -15,6 +15,10 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Exclure python3.dll (DLL de redirection qui fait echouer LoadLibrary dans _MEIxxxx sur Windows)
+a.binaries = [x for x in a.binaries if x[0].lower() != 'python3.dll']
+
 pyz = PYZ(a.pure)
 
 # MODE --onefile : tout est bundle dans UN SEUL EXE autonome
