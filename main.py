@@ -1,5 +1,17 @@
 import sys
 import os
+
+# 0. Configuration du chemin DLL Windows pour les extensions C (psutil, etc.) sous PyInstaller
+if getattr(sys, 'frozen', False):
+    mei_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    if hasattr(os, 'add_dll_directory') and os.path.exists(mei_dir):
+        try:
+            os.add_dll_directory(mei_dir)
+        except Exception:
+            pass
+    if mei_dir not in sys.path:
+        sys.path.insert(0, mei_dir)
+
 import shutil
 import tempfile
 import subprocess
