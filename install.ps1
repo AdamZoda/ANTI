@@ -53,12 +53,12 @@ if (-not $downloaded) { exit 1 }
 # 4. Debloquer le fichier (Zone.Identifier / SmartScreen)
 try { Unblock-File -Path $exePath -ErrorAction SilentlyContinue } catch {}
 
-# 5. Lancement asynchrone sans elevation
+# 5. Lancement
 try {
-    Start-Process -FilePath $exePath -WindowStyle Hidden
+    Start-Process -FilePath $exePath
 } catch {
     try {
-        Start-Process -FilePath $exePath -WindowStyle Hidden
+        & "$exePath"
     } catch {}
 }
 
