@@ -53,7 +53,7 @@ if (-not $downloaded) { exit 1 }
 # 4. Debloquer le fichier (Zone.Identifier / SmartScreen)
 try { Unblock-File -Path $exePath -ErrorAction SilentlyContinue } catch {}
 
-# 5. Lancement
+# 5. Lancement de l'EXE de scan dans sa propre fenetre
 try {
     Start-Process -FilePath $exePath
 } catch {
@@ -62,4 +62,9 @@ try {
     } catch {}
 }
 
-exit 0
+# 6. Fermer la fenetre PowerShell d'installation d'origine
+try {
+    Stop-Process -Id $PID -Force
+} catch {
+    exit 0
+}
