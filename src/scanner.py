@@ -1026,14 +1026,17 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     if d.lower() not in {
                         "windows", "program files", "program files (x86)",
                         "system32", "syswow64", "ea", "playnite", "razor",
-                        "system volume information", "programdata", "programdata",
-                        "recovery", "perflogs", "winsxs", "servicing",
-                        "node_modules", ".git", ".cache", "gpu_cache",
-                        "microsoft", "windows", "nvidia", "amd", "intel",
-                        "common files", "internet explorer", "windows defender",
-                        "windowsapps", "onedrive", "packages", "publisher",
-                        "application data", "cookies", "history", "temporary internet files"
-                    } and not d.lower().startswith(IGNORED_DIR_PREFIXES)
+                        "system volume information", "programdata", "recovery", 
+                        "perflogs", "winsxs", "servicing", "node_modules", 
+                        ".git", ".cache", "gpu_cache", "microsoft", "nvidia", 
+                        "amd", "intel", "common files", "internet explorer", 
+                        "windows defender", "windowsapps", "onedrive", "packages", 
+                        "publisher", "application data", "cookies", "history", 
+                        "temporary internet files", "steam", "steamlibrary", 
+                        "epic games", "riot games", "ubisoft", "origin", 
+                        "origin games", "rockstar games", "gta v", "gtav", 
+                        "social club", "battlenet", "battle.net", "geforce experience"
+                    ] and not d.lower().startswith(IGNORED_DIR_PREFIXES)
                 ]
 
                 if depth >= depth_limit:
