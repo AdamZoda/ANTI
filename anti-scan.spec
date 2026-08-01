@@ -2,12 +2,17 @@
 
 import os
 
+from PyInstaller.utils.hooks import collect_all
+
+datas, binaries, hiddenimports = collect_all('psutil')
+datas += [('config.json', '.')]
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[('config.json', '.')],
-    hiddenimports=['psutil'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
