@@ -20,7 +20,7 @@ if psutil_dir:
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[SPECPATH],
     binaries=psutil_binaries,
     datas=[('config.json', '.')],
     hiddenimports=[
@@ -28,6 +28,14 @@ a = Analysis(
         'psutil._pswindows',
         'psutil._psutil_windows',
         'psutil._common',
+        'src',
+        'src.ui',
+        'src.scanner',
+        'src.admin_sync',
+        'src.scorer',
+        'src.authenticode',
+        'src.storage',
+        'src.gui_app'
     ],
     hookspath=[],
     hooksconfig={},

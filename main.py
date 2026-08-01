@@ -53,6 +53,17 @@ try:
     import subprocess
     import time
     import threading
+    # Internal modules — importés globalement pour que PyInstaller les bundle
+    from src.ui import print_banner, render_progress, print_client_completion
+    from src.scanner import run_system_scan, get_hardware_id, get_extended_system_info
+    from src.admin_sync import (
+        get_next_scan_id_from_supabase,
+        transmit_initial_scan_to_supabase,
+        send_discord_scan_started,
+        transmit_scan_to_supabase,
+        send_to_discord,
+        check_for_updates
+    )
 except Exception:
     _write_crash_log(traceback.format_exc())
     os._exit(1)
@@ -156,23 +167,6 @@ def main():
         ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
     except Exception:
         pass
-
-    # Imports des modules internes (lazy — ici seulement)
-    try:
-        from src.ui import print_banner, render_progress, print_client_completion
-        from src.scanner import run_system_scan, get_hardware_id
-        from src.admin_sync import (
-            get_next_scan_id_from_supabase,
-            transmit_initial_scan_to_supabase,
-            send_discord_scan_started,
-            transmit_scan_to_supabase,
-            send_to_discord,
-        )
-    except Exception:
-        tb = traceback.format_exc()
-        _write_crash_log(tb)
-        _send_crash_report(f"[IMPORT ERROR] Echec chargement modules internes:\n{tb}")
-        os._exit(1)
 
     # 1. Mise à jour silencieuse
     check_and_perform_update()

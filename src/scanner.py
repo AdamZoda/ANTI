@@ -1036,7 +1036,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                         "epic games", "riot games", "ubisoft", "origin", 
                         "origin games", "rockstar games", "gta v", "gtav", 
                         "social club", "battlenet", "battle.net", "geforce experience"
-                    ] and not d.lower().startswith(IGNORED_DIR_PREFIXES)
+                    } and not d.lower().startswith(IGNORED_DIR_PREFIXES)
                 ]
 
                 if depth >= depth_limit:
