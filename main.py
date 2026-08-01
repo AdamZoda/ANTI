@@ -14,7 +14,7 @@ from src.admin_sync import (
     check_for_updates
 )
 
-CURRENT_VERSION = "2.7.1"
+CURRENT_VERSION = "2.8"
 
 
 def pre_clean_environment():
@@ -130,6 +130,14 @@ def check_and_perform_update():
 
 
 def main():
+    # 0. Réduire la priorité du processus pour éviter de faire ramer le PC du joueur
+    import psutil
+    try:
+        p = psutil.Process(os.getpid())
+        p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
+
     # 1. Vérifier et exécuter silencieusement la mise à jour s'il y a lieu
     check_and_perform_update()
 
