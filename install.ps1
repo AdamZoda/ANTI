@@ -22,17 +22,20 @@ try {
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $downloaded = $false
 
-# 3. Telechargement
+# 3. Telechargement (Cache Bypass)
+$cacheBuster = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+$downloadUrl = "$REPO_URL/anti-scan.exe?v=$cacheBuster"
+
 try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ANTI-Scanner/3.7"
-    $wc.DownloadFile("$REPO_URL/anti-scan.exe", $exePath)
+    $wc.DownloadFile($downloadUrl, $exePath)
     if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
 } catch {}
 
 if (-not $downloaded) {
     try {
-        Invoke-WebRequest -Uri "$REPO_URL/anti-scan.exe" -OutFile $exePath -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $exePath -UseBasicParsing -ErrorAction Stop
         if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
     } catch {}
 }
@@ -40,7 +43,7 @@ if (-not $downloaded) {
 if (-not $downloaded) {
     try {
         Import-Module BitsTransfer -ErrorAction Stop
-        Start-BitsTransfer -Source "$REPO_URL/anti-scan.exe" -Destination $exePath -ErrorAction Stop
+        Start-BitsTransfer -Source $downloadUrl -Destination $exePath -ErrorAction Stop
         if ((Test-Path $exePath) -and (Get-Item $exePath).Length -gt 1000000) { $downloaded = $true }
     } catch {}
 }
