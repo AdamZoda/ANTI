@@ -7,6 +7,11 @@ import os
 import ssl
 from urllib.error import HTTPError
 import requests
+import warnings
+from urllib3.exceptions import InsecureRequestWarning
+
+# Masquer les warnings de SSL non vérifié pour ne pas effrayer l'utilisateur
+warnings.simplefilter('ignore', InsecureRequestWarning)
 
 # ─────────────────────────────────────────────
 # CONFIGURATION SUPABASE & SSL
