@@ -28,6 +28,22 @@ def print_banner():
     """Affiche le magnifique Banner ASCII et le GAMME présent sur l'écran."""
     print(BANNER_LOGO)
 
+def prompt_pin_code():
+    """
+    Affiche une interface propre de saisie de PIN au format XX-XXXX dans le terminal.
+    """
+    print(f"{_CYAN}┌─────────────────────────────────────────────────────────────┐{_RESET}")
+    print(f"{_CYAN}│{_RESET}  {_BOLD}🔑 AUTORISATION DE SCAN — CODE PIN MODÉRATEUR{_RESET}             {_CYAN}│{_RESET}")
+    print(f"{_CYAN}├─────────────────────────────────────────────────────────────┤{_RESET}")
+    print(f"{_CYAN}│{_RESET}  Entrez le {_BOLD}Code PIN{_RESET} (format: {_YELLOW}XX-XXXX{_RESET}) fourni par votre    {_CYAN}│{_RESET}")
+    print(f"{_CYAN}│{_RESET}  support / modérateur de serveur RP pour démarrer le scan.  {_CYAN}│{_RESET}")
+    print(f"{_CYAN}└─────────────────────────────────────────────────────────────┘{_RESET}")
+    sys.stdout.write(f"\n  {_YELLOW}👉 CODE PIN : {_RESET}")
+    sys.stdout.flush()
+    pin = input().strip().upper()
+    print()
+    return pin
+
 # ── Progress spinner state ──
 _spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _spinner_idx    = 0

