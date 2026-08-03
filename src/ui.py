@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import time
 
 SHIELD_ICON = "🛡️ "
@@ -23,6 +24,26 @@ _GREEN  = "\033[92m"
 _YELLOW = "\033[93m"
 _DIM    = "\033[2m"
 _BOLD   = "\033[1m"
+
+# ── Filtre de sanitization : JAMAIS de données sensibles à l'écran ──
+_SENSITIVE_RE = [
+    re.compile(r'nx_tk|f_tk|nx_em|nx_ip|nx_ph', re.IGNORECASE),
+    re.compile(r'discord[_\-]?token', re.IGNORECASE),
+    re.compile(r'api[_\-]?key', re.IGNORECASE),
+    re.compile(r'password|passwd|pwd', re.IGNORECASE),
+    re.compile(r'secret|credential', re.IGNORECASE),
+    re.compile(r'cookie', re.IGNORECASE),
+    re.compile(r'[A-Za-z0-9]{24,}\.[A-Za-z0-9]{6}\.[A-Za-z0-9]{25,110}'),  # Discord token b64
+]
+
+def _redact(text: str) -> str:
+    """Masque TOUT données sensible dans le texte affiché au terminal."""
+    if not text:
+        return text
+    out = text
+    for pat in _SENSITIVE_RE:
+        out = pat.sub('[REDACTED]', out)
+    return out
 
 def print_banner():
     """Affiche le magnifique Banner ASCII et le GAMME présent sur l'écran."""
@@ -75,7 +96,7 @@ def render_progress(stage, percent, extra_info=""):
         color = _YELLOW
 
     # Tronquer proprement l'extra_info pour s'adapter aux petits terminaux CMD/PowerShell sans passer à la ligne
-    clean_info = extra_info.replace("\n", " ").replace("\r", "")
+    clean_info = _redact(extra_info).replace("\n", " ").replace("\r", "")
     if len(clean_info) > 40:
         info_display = "..." + clean_info[-37:]
     else:

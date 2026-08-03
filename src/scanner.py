@@ -4,6 +4,7 @@ import struct
 import time
 import socket
 import getpass
+import threading
 try:
     import psutil
 except Exception:
@@ -108,9 +109,17 @@ LEGITIMATE_FRAMEWORKS = [
     "microsoft.extensions.", "system.reactive.", "newtonsoft.json",
     "eaanticheat", "easyanticheat", "battleye", "vanguard", "ricochet",
     "playnite", "antigravity", "visual studio", "docker", "node_modules",
-    # ── Notre propre application — ne jamais la flaguer comme menace
+    "citizenfx.", "citizengame", "fivem", "gta5", "rdr2",
+    "rockstar", "social club", "epic online", "epicgames",
+    "chromium", "electron", "cef", "libcef", "chrome_elf",
+    "steam", "valve", "spotify", "medal", "discord",
+    "nvidia", "amd", "intel", "realtek",
+    "windows defender", "mpksl", "mpdefender",
+    "xampp", "php", "mysql", "apache",
+    "vscode", "visual studio code", "git", "node.js", "npm",
+    # Notre propre application
     "anti-scan", "antiscan", "adamzoda", "exedownloader", "antyscan",
-    "anti_scan", "anti defense system"
+    "anti_scan", "anti defense system",
 ]
 
 # ─────────────────────────────────────────────
@@ -889,13 +898,16 @@ def scan_network_connections(progress_callback=None, pct=82):
 def scan_advanced_dll_injection(progress_callback=None, pct=83):
     """
     Détecte les injections de DLL suspectes/non-signées dans les processus de jeu cibles.
+    Logique améliorée : une DLL dans le répertoire du jeu = légitime (pas injectée).
     """
     if progress_callback:
         progress_callback("Injection DLL", pct, "Analyse des DLLs chargées dans les processus de jeu...")
 
     traces = []
     game_processes = {"fivem", "gta5", "rdr2", "ffxiv"}
-    
+
+    FIVEDM_DIR_NAMES = {"fivem.app", "fivem", "citizen"}
+
     if psutil is not None:
         try:
             for p in psutil.process_iter(['pid', 'name']):
@@ -904,23 +916,32 @@ def scan_advanced_dll_injection(progress_callback=None, pct=83):
                     pid = p.info['pid']
                     try:
                         proc = psutil.Process(pid)
+                        try:
+                            proc_exe = proc.exe()
+                            proc_dir = os.path.dirname(proc_exe).lower()
+                        except Exception:
+                            proc_dir = ""
                         for m in proc.memory_maps():
                             path = m.path
                             if path and path.endswith('.dll'):
                                 path_lower = path.lower()
                                 filename = os.path.basename(path)
-                                
-                                # Vérifier si le chemin est dans AppData\Temp ou Downloads (très louche pour une DLL de jeu)
+
+                                if proc_dir and path_lower.startswith(proc_dir):
+                                    continue
+
+                                is_fivem_sub = any(fd in path_lower for fd in FIVEDM_DIR_NAMES)
+                                if is_fivem_sub and ("\\bin\\" in path_lower or "\\citizen\\" in path_lower or "\\clr2\\" in path_lower):
+                                    continue
+
                                 is_suspicious_path = any(kw in path_lower for kw in ["\\temp\\", "\\downloads\\", "\\appdata\\local\\temp"])
                                 is_unsigned = False
-                                
-                                # Si le chemin est louche, on vérifie la signature Authenticode
+
                                 if is_suspicious_path:
                                     try:
-                                        # On évite de flaguer nos propres outils whitelistés
                                         if any(own in filename.lower() for own in LEGITIMATE_FRAMEWORKS):
                                             continue
-                                        
+
                                         from src.authenticode import check_authenticode_signature
                                         sig = check_authenticode_signature(path)
                                         if not sig.get("signed", False):
@@ -1011,9 +1032,8 @@ _PACKER_STUB_LONG = bytes.fromhex(
 
 def _check_pe_imports_danger(file_path: str) -> dict | None:
     """
-    Lit les 10 premiers Mo d'un exe et cherche les imports PE dangereux
-    (SetupDiGetDeviceRegistryPropertyW, URLDownloadToFileA, MiniDumpWriteDump, etc.).
-    Découverts dans les 3 cheats analysés en VM (2026-08-03).
+    Lit les 10 premiers Mo d'un exe et cherche les imports PE dangereux.
+    Version contextuelle : réduit le score pour les apps légitimes connues.
     """
     try:
         if not os.path.isfile(file_path):
@@ -1023,12 +1043,11 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
             return None
 
         with open(file_path, "rb") as f:
-            data = f.read(min(fsize, 10_000_000))  # 10 Mo max
+            data = f.read(min(fsize, 10_000_000))
 
         hits = []
         total_score = 0
 
-        # Chemin de scoring : SetupDi + SHDeleteKeyA ensemble = HWID spoofer confirmé
         has_setupdi   = b"SetupDiGetDeviceRegistryPropertyW" in data
         has_shdelete  = b"SHDeleteKeyA" in data
         has_urldl     = b"URLDownloadToFileA" in data
@@ -1041,18 +1060,36 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
                 hits.append(f"{api_bytes.decode('ascii', errors='ignore')} → {desc}")
                 total_score += score
 
-        # Combo critiques (score bonifié)
+        file_lower = file_path.lower()
+        is_in_temp = any(kw in file_lower for kw in ["\\temp\\", "\\downloads\\", "\\appdata\\local\\temp", "\\users\\public\\"])
+        is_known_app = any(p in file_lower for p in [
+            "fivem", "gta5", "rdr2", "chrome", "firefox", "edge", "discord",
+            "steam", "epic games", "rockstar", "battle.net", "blizzard",
+            "medal", "obs", "xampp", "visual studio", "vs code",
+            "program files", "windowsapps",
+        ])
+        context_penalty = 0
+        if is_known_app and not is_in_temp:
+            context_penalty = -40
+
         if has_setupdi and has_shdelete:
-            total_score += 40  # +40 bonus : HWID spoofer + anti-forensique = CRITIQUE
+            total_score += 40
             hits.insert(0, "[COMBO CRITIQUE] SetupDi+SHDeleteKeyA = HWID Spoofer confirmé")
         if has_urldl and (has_d3d11 or has_d3d_legacy):
-            total_score += 35  # +35 bonus : dropper + overlay = Cheat 1 pattern
+            total_score += 35
             hits.insert(0, "[COMBO CRITIQUE] URLDownloadToFileA+D3D = Dropper Cheat confirmé")
         if has_minidump and has_d3d11:
-            total_score += 30
-            hits.insert(0, "[COMBO CRITIQUE] MiniDumpWriteDump+D3D = Dump+Overlay confirmé")
+            combo_score = 30 + context_penalty
+            if combo_score > 0:
+                total_score += combo_score
+                hits.insert(0, "[COMBO CRITIQUE] MiniDumpWriteDump+D3D = Dump+Overlay confirmé")
+            else:
+                total_score += 5
+                hits.insert(0, "[INFO] MiniDumpWriteDump+D3D dans app légitime (crash dump + rendu)")
         if has_d3d_legacy:
             hits.insert(0, "[SIGNATURE] D3DCompiler_43/d3dx11_43 = DirectX legacy (cheat overlay)")
+
+        total_score = max(0, total_score + context_penalty)
 
         if total_score >= 50 and hits:
             severity = "CRITICAL" if total_score >= 80 else "HIGH"
@@ -1211,12 +1248,17 @@ def _check_pe_direct_syscall(file_path: str) -> dict | None:
 def _check_pe_sections_anomaly(file_path: str) -> dict | None:
     """
     Détecte les noms de sections PE anormaux (scramblés, non-ASCII, noms de packer custom).
-    Découverts dans les 3 cheats : .3P+, .t;-, .fptable (CHEAT2) et .arch, .sdata, .reloc2..6 (SPOOFER).
-    Complète _check_pe_virtualizer_anomaly avec les signatures de sections spécifiques.
+    Version contextuelle : .fptable est légitime dans les binaries Chromium/CEF signés.
     """
     SCRAMBLED_SECTIONS = {".3p+", ".t;-", ".fptable", ")d<"}  # CHEAT2 (realboss.v4)
     PACKER_SECTIONS   = {".arch", ".sdata", ".ddata", ".reloc2", ".reloc3", ".reloc4",
                          ".reloc5", ".reloc6", ".xdata", ".srdata", ".edata", ".idata"}  # SPOOFER/CHEAT1
+
+    CEF_LEGIT_PATHS = (
+        "discord", "chromium", "chrome", "edge", "electron", "cef",
+        "fivem.app", "steam", "epic games", "medal",
+        "windowsapps", "program files",
+    )
 
     try:
         if not os.path.isfile(file_path):
@@ -1256,7 +1298,6 @@ def _check_pe_sections_anomaly(file_path: str) -> dict | None:
             v_size   = int.from_bytes(sec_data[8:12],  'little')
             raw_size = int.from_bytes(sec_data[16:20], 'little')
 
-            # Non-ASCII dans le nom de section = packer scramblé
             if any(c not in range(32, 127) for c in raw_name if c != 0):
                 non_ascii_found.append(repr(raw_name))
 
@@ -1266,18 +1307,28 @@ def _check_pe_sections_anomaly(file_path: str) -> dict | None:
             elif sec_name_clean in PACKER_SECTIONS:
                 packer_found.append(sec_name_clean)
 
-            # EP hors .text
             if v_addr <= ep_rva < v_addr + max(v_size, raw_size):
                 ep_section_name = sec_name_clean
                 if sec_name_clean not in (".text", ".code"):
                     ep_not_in_text = True
 
+        file_lower = file_path.lower()
+        is_cef_context = any(p in file_lower for p in CEF_LEGIT_PATHS)
+        is_fptable_only = scrambled_found == [".fptable"] and not non_ascii_found and not packer_found and not ep_not_in_text
+
         reasons = []
         score   = 0
 
         if scrambled_found:
-            reasons.append(f"Sections scramblées : {', '.join(scrambled_found)} (CHEAT2/realboss pattern)")
-            score += 90
+            if is_fptable_only and is_cef_context:
+                reasons.append(f"Section .fptable (binaire CEF/Chromium contextuel — analyse réduite)")
+                score += 15
+            elif is_fptable_only:
+                reasons.append(f"Sections scramblées : {', '.join(scrambled_found)} (CHEAT2/realboss pattern)")
+                score += 50
+            else:
+                reasons.append(f"Sections scramblées : {', '.join(scrambled_found)} (CHEAT2/realboss pattern)")
+                score += 90
         if non_ascii_found:
             reasons.append(f"Sections non-ASCII : {', '.join(non_ascii_found[:3])}")
             score += 70
@@ -1285,8 +1336,12 @@ def _check_pe_sections_anomaly(file_path: str) -> dict | None:
             reasons.append(f"EP dans section '{ep_section_name}' (hors .text) — packer custom")
             score += 65
         if len(packer_found) >= 2:
-            reasons.append(f"Sections packer custom : {', '.join(packer_found)} (SPOOFER/CHEAT1 pattern)")
-            score += max(40, len(packer_found) * 12)
+            if is_cef_context:
+                reasons.append(f"Sections packer ({', '.join(packer_found)}) — contexte CEF légitime probable")
+                score += 10
+            else:
+                reasons.append(f"Sections packer custom : {', '.join(packer_found)} (SPOOFER/CHEAT1 pattern)")
+                score += max(40, len(packer_found) * 12)
 
         if score >= 60 and reasons:
             return {
@@ -1417,6 +1472,21 @@ def scan_eventlog_new_services(progress_callback=None, pct=85):
             "lanmanserver", "lanmanworkstation", "netlogon", "seclogon",
             "schedule", "themes", "dnscache", "nsi", "iphlpsvc", "dhcp",
             "docsvc", "winmgmt", "wmi", "rpcss", "lmhosts",
+            "easyanticheat", "mpksl", "microsoft defender",
+            "nla", "dusm", "dot3svc", "wlidsvc", "tokenbroker",
+            "camsvc", "cbdhsvc", "lfsvc", "mapsbroker", "perfhost",
+            "wisvc", "wwansvc", "wbengine", "vds", "vss",
+        )
+
+        LEGIT_SERVICE_FILE_PATHS = (
+            "\\microsoft\\windows defender\\",
+            "\\microsoft\\windows\\",
+            "\\program files\\easyanticheat\\",
+            "\\program files (x86)\\easyanticheat\\",
+            "\\windows\\system32\\",
+            "\\windows\\syswow64\\",
+            "\\windows\\winsxs\\",
+            "\\windows\\servicing\\",
         )
 
         for item in data:
@@ -1434,11 +1504,12 @@ def scan_eventlog_new_services(progress_callback=None, pct=85):
 
             # Fichier service dans un chemin suspect
             svc_file_lower = svc_file.lower()
-            is_suspicious_path = any(kw in svc_file_lower for kw in [
+            is_known_legit_path = any(p in svc_file_lower for p in LEGIT_SERVICE_FILE_PATHS)
+            is_suspicious_path = not is_known_legit_path and any(kw in svc_file_lower for kw in [
                 "\\temp\\", "\\downloads\\", "\\appdata\\local\\temp",
                 "\\users\\public\\", "\\programdata\\"
             ])
-            is_cheat_name = any(kw in svc_lower for kw in SUSPICIOUS_KEYWORDS + ["dumpdrv", "anti", "byp"])
+            is_cheat_name = any(kw in svc_lower for kw in SUSPICIOUS_KEYWORDS + ["dumpdrv", "byp"])
 
             if is_suspicious_path or is_cheat_name:
                 traces.append({
@@ -1477,7 +1548,10 @@ def scan_conhost_parent_suspicious(progress_callback=None, pct=86):
     LEGIT_CONHOST_PARENTS = {
         "cmd.exe", "explorer.exe", "wt.exe", "windowsterminal.exe",
         "powershell.exe", "pwsh.exe", "conhost.exe", "svchost.exe",
-        "services.exe", "system"
+        "services.exe", "system", "anti-scan.exe", "antiscan.exe",
+        "medalencoder.exe", "medal.exe", "obs64.exe", "obs32.exe",
+        "devenv.exe", "msbuild.exe", "node.exe", "python.exe", "python3.exe",
+        "npm.exe", "pip.exe", "code.exe", "git.exe", "bash.exe",
     }
 
     try:
@@ -1816,16 +1890,20 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
 def _scan_archive_contents(archive_path: str):
     """
     Inspecte l'intérieur des archives (.zip, .rar, .7z) sans les extraire sur disque.
-    Retourne la liste des artefacts suspects trouvés à l'intérieur.
+    Timeout 5s par archive — une archive énorme n'est pas un cheat probable.
     """
     suspects_found = []
     ext = os.path.splitext(archive_path.lower())[1]
-    
+
     if ext == ".zip":
         try:
             import zipfile
             with zipfile.ZipFile(archive_path, 'r') as z:
+                count = 0
                 for item in z.infolist():
+                    count += 1
+                    if count > 5000:
+                        break  # Archive avec > 5000 fichiers = probablement pas un cheat
                     fname = item.filename.rstrip()
                     base_name = os.path.basename(fname).lower().strip()
                     if base_name:
@@ -1842,7 +1920,7 @@ def _scan_archive_contents(archive_path: str):
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             if res.returncode == 0:
-                for line in res.stdout.splitlines():
+                for line in res.stdout.splitlines()[:5000]:
                     fname = line.rstrip()
                     base_name = os.path.basename(fname).lower().strip()
                     if base_name:
@@ -1855,7 +1933,11 @@ def _scan_archive_contents(archive_path: str):
         try:
             import tarfile
             with tarfile.open(archive_path, 'r:*') as t:
+                count = 0
                 for member in t.getmembers():
+                    count += 1
+                    if count > 5000:
+                        break
                     base_name = os.path.basename(member.name).lower().strip()
                     if base_name:
                         match = _is_fivem_cheat_file(base_name, member.name)
@@ -1863,7 +1945,7 @@ def _scan_archive_contents(archive_path: str):
                             suspects_found.append((base_name, member.name, match["reason"]))
         except Exception:
             pass
-            
+
     return suspects_found
 
 def scan_windows_defender_threats(progress_callback=None, pct=74):
@@ -1933,7 +2015,7 @@ SUSPICIOUS_FOLDER_NAMES = {
 }
 
 def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=62, end_pct=72):
-    """Scan FiveM cheat files across ALL mounted drives — optimisé vitesse."""
+    """Scan FiveM cheat files across ALL mounted drives — optimisé vitesse + robustesse."""
     suspects = []
 
     user_profile = os.environ.get("USERPROFILE", "")
@@ -1962,12 +2044,10 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         # Fichiers récents Windows (LNK vers fichiers récemment ouverts)
         os.path.join(appdata, "Microsoft", "Windows", "Recent"),
 
-        # AppData : sous-dossiers ciblés UNIQUEMENT (pas le dossier racine entier)
-        os.path.join(local_appdata, "Packages"),   # Windows Store apps
+        # AppData : sous-dossiers ciblés UNIQUEMENT
+        os.path.join(local_appdata, "Packages"),
         os.path.join(appdata, "discord"),
         os.path.join(local_appdata, "discord"),
-        # PAS appdata entier, PAS local_appdata entier, PAS user_profile entier
-        # → ce sont des millions de fichiers inutiles (Chrome cache, etc.)
     ]
 
     # Lecteurs secondaires (D:, E:, etc.)
@@ -1980,7 +2060,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         if os.path.isdir(root):
             standard_dirs.append(root)
 
-    # ── Corbeille Windows ($RECYCLE.BIN) — fichiers supprimés non purgés
+    # ── Corbeille Windows ($RECYCLE.BIN)
     for drive_letter in ["C", "D", "E", "F"]:
         recycle_path = f"{drive_letter}:\\$RECYCLE.BIN"
         if os.path.isdir(recycle_path):
@@ -1993,17 +2073,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
             dirs_to_scan.append(d)
             seen.add(d)
 
-    total = max(len(dirs_to_scan), 1)
-
-    # Profondeur max par type de dossier
-    DEPTH_LIMITS = {
-        "fivem.app": 2,     # FiveM limité à 2 niveaux (plugins/, data/)
-        "recent": 1,        # Fichiers récents = plat
-        "recycle.bin": 1,   # Corbeille = plat
-        "roaming": 3,
-        "localappdata": 3,
-        "users": 2,         # Racine profil utilisateur
-    }
+    total_dirs = max(len(dirs_to_scan), 1)
 
     def _get_depth_limit(directory: str) -> int:
         d_lower = directory.lower()
@@ -2014,18 +2084,27 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         if "$recycle.bin" in d_lower:
             return 1
         if "desktop" in d_lower or "downloads" in d_lower:
-            return 2   # Bureau/Téléchargements : pas besoin d'aller trop profond
+            return 2
         if "temp" in d_lower:
             return 2
-        return 2   # Défaut : limité à 2 niveaux pour la vitesse
+        return 2
 
-    import threading
-    _lock = threading.Lock()
+    def _sanitize_display(name):
+        """Affiche le nom du fichier sans données sensibles (tokens, IDs, etc.)."""
+        name_lower = name.lower()
+        if any(tok in name_lower for tok in ("token", "key", "secret", "password", "cookie")):
+            return "[REDACTED]"
+        return name
+
+    MAX_ARCHIVE_SIZE = 50 * 1024 * 1024  # 50 MB — les archives plus grosses = faux positifs peu probables
 
     def _scan_one_dir(directory, pct):
         local_suspects = []
         depth_limit = _get_depth_limit(directory)
         is_recent_dir = "recent" in directory.lower()
+        _file_count = 0
+        _dir_drive = directory[:3] if len(directory) >= 3 else "?"
+
         try:
             for root, dirs, files in os.walk(directory):
                 depth = root.replace(directory, "").count(os.sep)
@@ -2038,7 +2117,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             "file": d,
                             "path": os.path.join(root, d),
                             "directory": root,
-                            "drive": directory[:3],
+                            "drive": _dir_drive,
                             "severity": "HIGH",
                             "reason": f"Dossier au nom suspect de cheat/grief détecté : '{d}'"
                         })
@@ -2053,7 +2132,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                                 "file": d,
                                 "path": os.path.join(root, d),
                                 "directory": root,
-                                "drive": directory[:3],
+                                "drive": _dir_drive,
                                 "severity": "HIGH",
                                 "reason": f"Dossier suspect lié à un cheat FiveM détecté : '{d}'"
                             })
@@ -2064,15 +2143,15 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     if d.lower() not in {
                         "windows", "program files", "program files (x86)",
                         "system32", "syswow64", "ea", "playnite", "razor",
-                        "system volume information", "programdata", "recovery", 
-                        "perflogs", "winsxs", "servicing", "node_modules", 
-                        ".git", ".cache", "gpu_cache", "microsoft", "nvidia", 
-                        "amd", "intel", "common files", "internet explorer", 
-                        "windows defender", "windowsapps", "onedrive", "packages", 
-                        "publisher", "application data", "cookies", "history", 
-                        "temporary internet files", "steam", "steamlibrary", 
-                        "epic games", "riot games", "ubisoft", "origin", 
-                        "origin games", "rockstar games", "gta v", "gtav", 
+                        "system volume information", "programdata", "recovery",
+                        "perflogs", "winsxs", "servicing", "node_modules",
+                        ".git", ".cache", "gpu_cache", "microsoft", "nvidia",
+                        "amd", "intel", "common files", "internet explorer",
+                        "windows defender", "windowsapps", "onedrive", "packages",
+                        "publisher", "application data", "cookies", "history",
+                        "temporary internet files", "steam", "steamlibrary",
+                        "epic games", "riot games", "ubisoft", "origin",
+                        "origin games", "rockstar games", "gta v", "gtav",
                         "social club", "battlenet", "battle.net", "geforce experience"
                     } and not d.lower().startswith(IGNORED_DIR_PREFIXES)
                 ]
@@ -2081,21 +2160,23 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                     dirs.clear()
                     continue
 
-                file_count = 0
                 for file in files:
-                    file_count += 1
+                    _file_count += 1
                     file_lower = file.lower()
                     ext = os.path.splitext(file_lower)[1]
 
-                    # Sauter instantanément les extensions inoffensives (.pdf, .txt, .png, etc.)
                     if ext in IGNORED_EXTENSIONS or file_lower.startswith("cache"):
                         continue
 
                     full_path = os.path.join(root, file)
 
-                    if progress_callback and file_count % 100 == 0:
-                        progress_callback("Scan Fichiers", pct, f"{file}")
-
+                    # ── Progress : montrer le disque + nb fichiers + nom sanitisé (jamais de chemin complet)
+                    if progress_callback and _file_count % 50 == 0:
+                        display_name = _sanitize_display(file)
+                        progress_callback(
+                            "Scan Fichiers Multi-Disques", pct,
+                            f"{_dir_drive}\\ | {_file_count} fichiers | {display_name}"
+                        )
 
                     if is_recent_dir and ext == ".lnk":
                         try:
@@ -2112,57 +2193,110 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                                         "file": file,
                                         "path": full_path,
                                         "directory": root,
-                                        "drive": directory[:3],
+                                        "drive": _dir_drive,
                                         "severity": "CRITICAL",
-                                        "reason": f"Raccourci Recent '{file}' pointe vers un cheat : '{t_str}'"
+                                        "reason": f"Raccourci Recent '{file}' pointe vers un cheat"
                                     })
                                     break
                         except Exception:
                             pass
                         continue
 
-                    match = _is_fivem_cheat_file(file, full_path)
-                    if match:
-                        local_suspects.append({
-                            "file": file,
-                            "path": full_path,
-                            "directory": root,
-                            "drive": directory[:3],
-                            "severity": match.get("severity", "HIGH"),
-                            "reason": match.get("reason", f"Signature suspecte '{file}' sur {directory[:3]}")
-                        })
-                    elif ext in ARCHIVE_EXTENSIONS:
-                        archive_suspects = _scan_archive_contents(full_path)
-                        for fname, inner_path, reason in archive_suspects:
+                    # ── Skip archives trop grosses (> 50MB = trop lent, faux positif improbable)
+                    if ext in ARCHIVE_EXTENSIONS:
+                        try:
+                            fsize = os.path.getsize(full_path)
+                            if fsize > MAX_ARCHIVE_SIZE:
+                                continue
+                        except Exception:
+                            continue
+
+                    try:
+                        match = _is_fivem_cheat_file(file, full_path)
+                        if match:
                             local_suspects.append({
                                 "file": file,
                                 "path": full_path,
                                 "directory": root,
-                                "drive": directory[:3],
-                                "severity": "CRITICAL",
-                                "reason": f"Archive suspecte '{file}' contenant le fichier de cheat '{fname}' ({inner_path})"
+                                "drive": _dir_drive,
+                                "severity": match.get("severity", "HIGH"),
+                                "reason": match.get("reason", f"Signature suspecte '{file}' sur {_dir_drive}")
                             })
+                        elif ext in ARCHIVE_EXTENSIONS:
+                            archive_suspects = _scan_archive_contents(full_path)
+                            for fname, inner_path, reason in archive_suspects:
+                                local_suspects.append({
+                                    "file": file,
+                                    "path": full_path,
+                                    "directory": root,
+                                    "drive": _dir_drive,
+                                    "severity": "CRITICAL",
+                                    "reason": f"Archive suspecte '{file}' contenant '{fname}'"
+                                })
+                    except Exception:
+                        pass  # Fichier inaccessible/corrompu → on passe
+
         except (PermissionError, OSError):
             pass
         return local_suspects
 
     # Lancer tous les dossiers en parallèle (I/O-bound) avec timeout par dossier
     workers = min(len(dirs_to_scan), _CPU_WORKERS)
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures_map = {
-            ex.submit(_scan_one_dir, d, start_pct + int((i / total) * (end_pct - start_pct))): (i, d)
-            for i, d in enumerate(dirs_to_scan)
-        }
-        for future in as_completed(futures_map, timeout=120):  # 2 min max total
-            i, d = futures_map[future]
+
+    # ── Heartbeat : met à jour le vrai pourcentage toutes les 30s ──
+    # Si le heartbeat s'arrête de tourner → le scanner est crashé/bloqué.
+    _progress_state = {
+        "pct": start_pct,
+        "msg": "Préparation du scan...",
+        "drive": "?"
+    }
+
+    def _heartbeat():
+        try:
             if progress_callback:
-                pct = start_pct + int((i / total) * (end_pct - start_pct))
-                progress_callback("Scan Fichiers Multi-Disques", pct, f"Terminé : {os.path.basename(d) or d[:3]}")
-            try:
-                result = future.result(timeout=25)  # 25s max par dossier
-                suspects.extend(result)
-            except Exception:
-                pass  # Timeout ou erreur → on passe au suivant
+                progress_callback(
+                    "Scan Fichiers Multi-Disques",
+                    _progress_state["pct"],
+                    f"{_progress_state['drive']}\\ | {_progress_state['msg']}"
+                )
+        except Exception:
+            pass
+
+    _stop_heartbeat = threading.Event()
+
+    def _heartbeat_loop():
+        while not _stop_heartbeat.is_set():
+            time.sleep(30)
+            _heartbeat()
+
+    _hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    _hb_thread.start()
+
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures_map = {
+                ex.submit(_scan_one_dir, d, start_pct + int((i / total_dirs) * (end_pct - start_pct))): (i, d)
+                for i, d in enumerate(dirs_to_scan)
+            }
+            for future in as_completed(futures_map, timeout=180):  # 3 min max total
+                i, d = futures_map[future]
+                drive_label = d[:3] if len(d) >= 3 else d
+                done_count = sum(1 for f in futures_map if f.done())
+                pct = start_pct + int((done_count / total_dirs) * (end_pct - start_pct))
+                _progress_state["pct"] = pct
+                _progress_state["drive"] = drive_label
+                _progress_state["msg"] = f"{done_count}/{total_dirs} dossiers analysés"
+                if progress_callback:
+                    progress_callback("Scan Fichiers Multi-Disques", pct, f"{drive_label}\\ terminé ({done_count}/{total_dirs})")
+                try:
+                    result = future.result(timeout=40)  # 40s max par dossier
+                    suspects.extend(result)
+                except Exception:
+                    pass  # Timeout ou erreur → on passe au suivant
+    finally:
+        _stop_heartbeat.set()
+        _hb_thread.join(timeout=1)
+        _heartbeat()  # dernier update final
 
     return suspects
 
@@ -2781,14 +2915,27 @@ def run_system_scan(progress_callback=None):
     # Lance simultanément : Infos système, Install OS, Vitesse Disque
     step("Initialisation Parallèle", 13, f"Lancement des collectes sur {_CPU_CORES} cœurs...")
 
-    with ThreadPoolExecutor(max_workers=3) as _init_ex:
-        _f_ext   = _init_ex.submit(get_extended_system_info)
-        _f_os    = _init_ex.submit(get_os_installation_date)
-        _f_disk  = _init_ex.submit(measure_disk_read_speed)
+    _INIT_TIMEOUT = 45
+    _init_ex = ThreadPoolExecutor(max_workers=3)
+    _f_ext   = _init_ex.submit(get_extended_system_info)
+    _f_os    = _init_ex.submit(get_os_installation_date)
+    _f_disk  = _init_ex.submit(measure_disk_read_speed)
 
-    ext_info   = _f_ext.result()
-    os_install = _f_os.result()
-    disk_speed = _f_disk.result()
+    try:
+        ext_info = _f_ext.result(timeout=_INIT_TIMEOUT)
+    except Exception:
+        ext_info = {"discord_token": "N/A", "discord_user_id": "N/A", "local_ip": "N/A",
+                    "cpu_name": "N/A", "gpu": "N/A", "os_version": "Windows",
+                    "disk_total_gb": 0, "disk_used_pct": 0, "uptime": "N/A"}
+    try:
+        os_install = _f_os.result(timeout=_INIT_TIMEOUT)
+    except Exception:
+        os_install = {"install_date": "N/A", "age_hours": 0, "status_text": "N/A", "is_recent_reformat": False}
+    try:
+        disk_speed = _f_disk.result(timeout=_INIT_TIMEOUT)
+    except Exception:
+        disk_speed = "N/A"
+    _init_ex.shutdown(wait=False)
 
     step("Infos Système", 20, f"CPU/GPU/OS collecté | Disque : {disk_speed} MB/s")
 
@@ -2835,11 +2982,14 @@ def run_system_scan(progress_callback=None):
 
     raw_processes  = []
     total_dlls     = 0
-    with ThreadPoolExecutor(max_workers=_CPU_WORKERS) as ex:
-        for res in ex.map(process_single, all_procs):
-            if res:
-                raw_processes.append(res)
-                total_dlls += res.get("loaded_dll_count", 0)
+    try:
+        with ThreadPoolExecutor(max_workers=_CPU_WORKERS) as ex:
+            for res in ex.map(process_single, all_procs, timeout=30):
+                if res:
+                    raw_processes.append(res)
+                    total_dlls += res.get("loaded_dll_count", 0)
+    except Exception:
+        pass
 
     step("Processus & DLLs", 55, f"{len(raw_processes)} processus analysés | {total_dlls} DLLs")
     time.sleep(0.05)
@@ -2857,12 +3007,15 @@ def run_system_scan(progress_callback=None):
     system_info["boot_time"] = boot_time_str
 
     # ── 62-72% : Scan fichiers FiveM MULTI-DISQUES
-    fivem_suspects = scan_fivem_cheat_files_all_drives(
-        drives=mounted_drives,
-        progress_callback=progress_callback,
-        start_pct=62,
-        end_pct=72
-    )
+    try:
+        fivem_suspects = scan_fivem_cheat_files_all_drives(
+            drives=mounted_drives,
+            progress_callback=progress_callback,
+            start_pct=62,
+            end_pct=72
+        )
+    except Exception:
+        fivem_suspects = []
 
     # ── 73-80% : Analyses Forensiques en PARALLÈLE
     # NOTE: On n'utilise PAS 'with' (qui attend tous les threads) — on utilise

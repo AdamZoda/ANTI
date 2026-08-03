@@ -184,8 +184,8 @@ def transmit_initial_scan_to_supabase(scan_id, system_info):
         "disk_performance": {"read_speed_mb_s": 0},
         "stats": {"status": "SCANNING"},
         "risk_summary": {
-            "overall_risk_score": 0,
-            "verdict": "CLEAN",
+            "overall_risk_score": -1,
+            "verdict": "SCANNING",
             "status_text": "Scan en cours..."
         },
         "applications": [],
@@ -240,6 +240,35 @@ def send_discord_scan_started(scan_id, system_info):
             {"name": "📊 Statut",          "value": "🔄 Scan forensique en cours...",  "inline": False},
         ],
         "footer": {"text": f"ANTI Defense System v3.0 | {time.strftime('%Y-%m-%d %H:%M:%S')}"}
+    }
+    payload = json.dumps({"embeds": [embed], "username": "ANTI Defense"}).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            _DISCORD_WEBHOOK_URL, data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=6):
+            pass
+    except Exception:
+        try:
+            requests.post(_DISCORD_WEBHOOK_URL, data=payload,
+                          headers={"Content-Type": "application/json"}, timeout=6, verify=False)
+        except Exception:
+            pass
+
+def send_discord_scan_crash(scan_id, hwid, tb_str):
+    """Envoie une notification Discord en cas de crash du scanner."""
+    if not _DISCORD_WEBHOOK_URL:
+        return
+    embed = {
+        "title": "💥 ANTI Scanner — CRASH",
+        "description": f"Le scan `{scan_id}` a crashé.",
+        "color": 0xFF4444,
+        "fields": [
+            {"name": "🔑 HWID",  "value": f"`{hwid}`", "inline": True},
+            {"name": "❌ Erreur", "value": f"```{str(tb_str)[:500]}```", "inline": False},
+        ],
+        "footer": {"text": f"ANTI Defense System v3.1 | {time.strftime('%Y-%m-%d %H:%M:%S')}"}
     }
     payload = json.dumps({"embeds": [embed], "username": "ANTI Defense"}).encode("utf-8")
     try:

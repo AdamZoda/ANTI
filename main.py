@@ -23,17 +23,60 @@ def _write_crash_log(tb_str):
 
 
 def _send_crash_report(tb_str):
-    """Envoie le crash/erreur vers Supabase + Discord même si le scan n'est pas terminé."""
+    """Patch le scan existant en CRASHED au lieu de créer un nouveau row."""
+    _patch_scan_as_crashed(_g_scan_id, tb_str)
+
+
+def _patch_scan_as_crashed(scan_id, tb_str):
+    """PATCH direct du scan vers CRASHED avec erreur visible."""
+    if not scan_id:
+        return
     try:
-        from src.admin_sync import transmit_crash_to_supabase
-        transmit_crash_to_supabase(
-            scan_id=_g_scan_id,
-            hwid=_g_hwid,
-            system_info=dict(_g_sys_info) if _g_sys_info else {},
-            tb_str=tb_str
-        )
-    except Exception:
-        pass
+        import json
+        import urllib.request
+        from src.admin_sync import SUPABASE_URL, SUPABASE_ANON_KEY, _get_ssl_context
+
+        crash_text = str(tb_str) if tb_str else "Unknown crash"
+        payload = {
+            "risk_summary": {
+                "overall_risk_score": 100,
+                "verdict": "CRASHED",
+                "status_text": f"CRASH: {crash_text[:200]}"
+            },
+            "applications": [{
+                "app_name": "CRASH_SCANNER_FAILURE",
+                "exe_path": "ERROR_LOG",
+                "sha256": None,
+                "signature": {"signed": False, "status": "CrashLog"},
+                "instances_count": 0,
+                "pids": [],
+                "total_dll_count": 0,
+                "status_type": "CRASH_ERROR",
+                "risk_assessment": {
+                    "risk_score": 100,
+                    "observations": [{
+                        "severity": "CRITICAL",
+                        "title": "Erreur Fatale / Crash du Scanner",
+                        "description": crash_text[:1000]
+                    }]
+                }
+            }],
+            "system_info": dict(_g_sys_info) if _g_sys_info else {}
+        }
+        if _g_sys_info:
+            payload["system_info"]["crash_error"] = crash_text[:500]
+
+        data_bytes = json.dumps(payload).encode("utf-8")
+        url = f"{SUPABASE_URL}/rest/v1/scans?scan_id=eq.{scan_id}"
+        req = urllib.request.Request(url, data=data_bytes, headers={
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        }, method="PATCH")
+        with urllib.request.urlopen(req, context=_get_ssl_context(), timeout=15) as response:
+            pass
+    except Exception as e:
+        print(f"  \033[93m⚠ Impossible d'envoyer le crash report: {e}\033[0m")
 
 
 # 0. Configuration du chemin DLL Windows pour les extensions C (psutil, etc.) sous PyInstaller
@@ -174,8 +217,8 @@ def main():
     # 1. Mise à jour silencieuse
     check_and_perform_update()
 
-    # 2. Watchdog (6 min max)
-    arm_watchdog_timer(max_lifetime_sec=360)
+    # 2. Watchdog (3 min max — si pas terminé en 3 min c'est un crash)
+    arm_watchdog_timer(max_lifetime_sec=180)
 
     # 3. Nettoyage pré-scan
     pre_clean_environment()
@@ -246,7 +289,22 @@ def main():
 
     # 9. Scan système avec progress bar terminal
     render_progress("Scan Système", 8, "Démarrage de l'analyse forensique...")
-    scan_data = run_system_scan(progress_callback=render_progress)
+    try:
+        scan_data = run_system_scan(progress_callback=render_progress)
+    except Exception:
+        crash_tb = traceback.format_exc()
+        _write_crash_log(crash_tb)
+        # PATCH immédiat du scan existant → CRASHED
+        _patch_scan_as_crashed(scan_id, crash_tb)
+        print(f"\n  \033[91m✗ SCAN CRASHÉ\033[0m — cause envoyée au dashboard\n")
+        _g_hwid_for_discord = _g_hwid or "UNKNOWN"
+        try:
+            from src.admin_sync import send_discord_scan_crash
+            send_discord_scan_crash(scan_id, _g_hwid_for_discord, crash_tb)
+        except Exception:
+            pass
+        time.sleep(3)
+        os._exit(1)
     scan_data["scan_id"] = scan_id
     scan_data["pin_code"] = valid_pin_data.get("pin_code")
     scan_data["created_by_discord_id"] = valid_pin_data.get("created_by_discord_id")
