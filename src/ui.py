@@ -8,12 +8,12 @@ SHIELD_ICON = "🛡️ "
 # Magnifique ASCII Art "ANTI" 3D turquoise
 BANNER_LOGO = f"""\033[96m
 ================================================================================
-   █████╗ ███╗   ██╗████████╗██╗     {SHIELD_ICON} ANTI DEFENSE SYSTEM
-  ██╔══██╗████╗  ██║╚══██╔══╝██║     System Integrity & Telemetry Scanner
-  ███████║██╔██╗ ██║   ██║   ██║     Version 3.1 (MAJESTIC)
-  ██╔══██║██║╚██╗██║   ██║   ██║     100% Defensive Security Engine
-  ██║  ██║██║ ╚████║   ██║   ██║
-  ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝
+   █████╗ ███╗   ██╗████████╗██╗    {SHIELD_ICON} ANTI DEFENSE SYSTEM
+  ██╔══██╗████╗  ██║╚══██╔══╝██║    System Integrity & Telemetry Scanner
+  ███████║██╔██╗ ██║   ██║   ██║    Version 3.2 (Partners only)
+  ██╔══██║██║╚██╗██║   ██║   ██║    100% Defensive Scanning Security Engine 
+  ██║  ██║██║ ╚████║   ██║   ██║    Official download:https://anti.auradevlab.com
+  ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝     Ecosystem : Echo • Ocean • Napse
 ================================================================================
 \033[0m"""
 
@@ -56,7 +56,7 @@ def prompt_pin_code():
     print(f"{_CYAN}┌─────────────────────────────────────────────────────────────┐{_RESET}")
     print(f"{_CYAN}│{_RESET}  {_BOLD}🔑 AUTORISATION DE SCAN — CODE PIN MODÉRATEUR{_RESET}             {_CYAN}│{_RESET}")
     print(f"{_CYAN}├─────────────────────────────────────────────────────────────┤{_RESET}")
-    print(f"{_CYAN}│{_RESET}  Entrez le {_BOLD}Code PIN{_RESET} (format: {_YELLOW}XX-XXXX{_RESET}) fourni par votre    {_CYAN}│{_RESET}")
+    print(f"{_CYAN}│{_RESET}  Entrez le {_BOLD}Code PIN{_RESET}  (format: {_YELLOW}XX-XXXX{_RESET}) fourni par votre    {_CYAN}│{_RESET}")
     print(f"{_CYAN}│{_RESET}  support / modérateur de serveur RP pour démarrer le scan.  {_CYAN}│{_RESET}")
     print(f"{_CYAN}└─────────────────────────────────────────────────────────────┘{_RESET}")
     sys.stdout.write(f"\n  {_YELLOW}👉 CODE PIN : {_RESET}")
@@ -81,7 +81,7 @@ def render_progress(stage, percent, extra_info=""):
     _spinner_idx = (_spinner_idx + 1) % len(_spinner_frames)
     spinner = _spinner_frames[_spinner_idx]
 
-    bar_width = 24
+    bar_width = 16
     filled = int(bar_width * display_pct // 100)
     bar = "━" * filled + "╌" * (bar_width - filled)
 
@@ -97,8 +97,8 @@ def render_progress(stage, percent, extra_info=""):
 
     # Tronquer proprement l'extra_info pour s'adapter aux petits terminaux CMD/PowerShell sans passer à la ligne
     clean_info = _redact(extra_info).replace("\n", " ").replace("\r", "")
-    if len(clean_info) > 40:
-        info_display = "..." + clean_info[-37:]
+    if len(clean_info) > 28:
+        info_display = "..." + clean_info[-25:]
     else:
         info_display = clean_info
 
@@ -107,8 +107,8 @@ def render_progress(stage, percent, extra_info=""):
         f"\r\033[K{color}{spinner}{_RESET} "
         f"{color}[{bar}]{_RESET} "
         f"{_BOLD}{display_pct:3d}%{_RESET}  "
-        f"{_DIM}{stage:<16}{_RESET}  "
-        f"\033[37m{info_display:<40}{_RESET}"
+        f"{_DIM}{stage:<14}{_RESET}  "
+        f"\033[37m{info_display:<28}{_RESET}"
     )
 
     sys.stdout.write(line)

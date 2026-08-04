@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Folder, File, ArrowUp, RefreshCw } from 'lucide-react'
 
@@ -6,6 +6,7 @@ export default function FileManager({ agent }) {
   const [path, setPath] = useState('C:\\')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
+  const agentRef = useRef(agent.device_id)
 
   const listFiles = async (dir) => {
     setLoading(true)
@@ -20,6 +21,8 @@ export default function FileManager({ agent }) {
       if (error) throw error
 
       let attempts = 0
+      const maxAttempts = 120
+
       const poll = setInterval(async () => {
         attempts++
         const { data: updated } = await supabase
@@ -28,7 +31,7 @@ export default function FileManager({ agent }) {
           .eq('id', data.id)
           .single()
 
-        if (updated?.status === 'COMPLETED' || attempts >= 15) {
+        if (updated?.status === 'COMPLETED' || attempts >= maxAttempts) {
           clearInterval(poll)
           setLoading(false)
           if (updated?.result) {
@@ -42,26 +45,34 @@ export default function FileManager({ agent }) {
           }
         }
       }, 500)
+
+      setTimeout(() => clearInterval(poll), 60000)
     } catch (e) {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    listFiles(path)
-  }, [])
+    agentRef.current = agent.device_id
+    setItems([])
+    setPath('C:\\')
+    listFiles('C:\\')
+  }, [agent.device_id])
 
   const openItem = (item) => {
     if (item.type === 'dir') {
-      listFiles(item.name.startsWith('C:') ? item.name : `${path}\\${item.name}`)
+      const sep = path.endsWith('\\') ? '' : '\\'
+      listFiles(path + sep + item.name)
     }
   }
 
   const goUp = () => {
-    const parts = path.split('\\').filter(Boolean)
+    const normalized = path.replace(/\\+$/, '')
+    const parts = normalized.split('\\')
     if (parts.length > 1) {
       parts.pop()
-      listFiles(parts.join('\\'))
+      const newPath = parts.length === 1 ? parts[0] + '\\' : parts.join('\\')
+      listFiles(newPath)
     }
   }
 

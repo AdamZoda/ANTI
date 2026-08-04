@@ -164,8 +164,65 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
         confidence_score = 80
         confidence_reasons.append("Traces d'exécution historiques (Prefetch) détectées pour des fichiers supprimés.")
 
+    # ── 4. Détection VM / RDP / VPS (score direct sur le risque global) ──
+    if system_info and system_info.get("is_running_in_vm"):
+        vm_score_val = system_info.get("vm_score", 0)
+        vm_details   = system_info.get("vm_details", [])
+        confidence_level = "COMPROMIS (SCAN INVALIDE — VM/RDP/VPS)"
+        confidence_score = 10
+        confidence_reasons.append(
+            f"Scan lancé depuis un environnement virtuel ou distant (RDP/VPS). "
+            f"Score VM/RDP : {vm_score_val}/25. "
+            f"Preuves : {'; '.join(vm_details[:5])}"
+        )
+        # Le VM score impacte directement le score de risque
+        if vm_score_val >= 10:
+            threat_level_override = "ÉLEVÉ (HIGH) — SCAN INVALIDE"
+            verdict_override = "CHEATER"
+            if max_score < 90:
+                max_score = 90
+        elif vm_score_val >= 6:
+            threat_level_override = "MODÉRÉ (MEDIUM) — SCAN SUSPECT"
+            verdict_override = "ANORMAL"
+            if max_score < 50:
+                max_score = 50
+
+    # ── 5. Détection Scripts Lua/JS suspects dans FiveM ──
+    if system_info:
+        lua_suspect_count = system_info.get("fivem_lua_js_suspect_count", 0)
+        if lua_suspect_count > 0:
+            confidence_reasons.append(
+                f"{lua_suspect_count} script(s) Lua/JS suspect(s) trouvé(s) dans les répertoires FiveM (cache, plugins, nui)."
+            )
+            if lua_suspect_count >= 5:
+                if max_score < 65:
+                    max_score = 65
+            elif lua_suspect_count >= 2:
+                if max_score < 45:
+                    max_score = 45
+            else:
+                if max_score < 30:
+                    max_score = 30
+
+    # ── 6. Détection Process Hollowing (GTA5/FiveM) ──
+    if system_info:
+        hollowing = system_info.get("process_hollowing_detected", False)
+        hollowing_count = len(system_info.get("process_hollowing_details", []))
+        if hollowing:
+            confidence_reasons.append(
+                f"Chaîne de processus suspecte détectée sur {hollowing_count} instance(s) GTA5/FiveM (possible process hollowing)."
+            )
+            if max_score < 70:
+                max_score = 70
+
     # ── Verdict final
-    if max_score >= 60:
+    if system_info and system_info.get("is_running_in_vm") and system_info.get("vm_score", 0) >= 10:
+        threat_level = "ÉLEVÉ (HIGH) — SCAN INVALIDE (VM/RDP/VPS)"
+        verdict = "CHEATER"
+    elif system_info and system_info.get("is_running_in_vm") and system_info.get("vm_score", 0) >= 6:
+        threat_level = "MODÉRÉ (MEDIUM) — SCAN SUSPECT (VM/RDP/VPS)"
+        verdict = "ANORMAL"
+    elif max_score >= 60:
         threat_level = "ÉLEVÉ (HIGH)"
         verdict = "CHEATER"
     elif max_score >= 30:

@@ -45,7 +45,38 @@ SPECIFIC_CHEATS = [
     # Added cheat names & sample signatures (realboss, masqueraded loader, spoty)
     "hammafia", "susano", "tz project", "tzx", "skript", "phaze", "lumia", 
     "keyser", "tiago", "projectyx", "kekhack", "lunacy", "hx hacks",
-    "realboss", "realboss.v4", "spoty.bat", "ejtgv5l1d", "ntoskrnl.exe"
+    "realboss", "realboss.v4", "spoty.bat", "ejtgv5l1d", "ntoskrnl.exe",
+
+    # ── Cheats modernes FiveM (2024-2026) ──
+    "nitwit", "nitwit.exe", "nit_wit",
+    "quasar", "quasar菜单",
+    "sapphire", "sapphire_menu",
+    "ox_lib", "oxlib",
+    "jaguar", "jaguar_menu",
+    "infinity", "infinity_menu",
+    "aria", "aria_menu",
+    "nova", "nova_menu",
+    "fluxus", "synapse", "scriptware",
+    "krnl", "hydrogen", "celery",
+    "evolve", "evolve_menu",
+    "rise", "rise_menu",
+    "nixware", "gamesense",
+    "absolute", "absolute_menu",
+    "vex", "vex_menu",
+    "cobra", "cobra_menu",
+    "spoon", "spoon_menu",
+    "dark", "dark_menu",
+    "fivem_menu", "fivemcheat",
+    "lua_executor", "js_executor", "nodemenu",
+    "menulib", "menulibrary",
+    "citizenfx_cheat", "cfx_hack",
+    "executor_external", "executor_internal",
+    "game_overlay", "esp_wallhack", "aimbot",
+    "ragebot", "legitbot", "silentaim",
+    "hwid_spoof", "hwid_spoofer",
+    "temploader", "temp_load",
+    "undetected", "undetected_loader",
+    "bypasser", "anti_ac", "anticheat_bypass",
 ]
 
 SUSPICIOUS_KEYWORDS = [
@@ -72,13 +103,28 @@ LOW_CONFIDENCE_TERMS = [
 CHEAT_EXTENSIONS = {".asi", ".lua", ".dll", ".exe", ".ini", ".vbs", ".bat", ".ps1"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz"}
 
+# Extensions de jeux GTA/FiveM (assets volumineux, PAS des cheats) — à ignorer systématiquement
+GAME_ASSET_EXTENSIONS = {
+    ".rpf", ".yft", ".ytd", ".ymap", ".ytyp", ".ydr", ".ydd", ".ybn",
+    ".ytd", ".ycd", ".ysc", ".meta", ".xml",
+    ".wav", ".ogg", ".mp3",
+    ".gfx", ".dds", ".png", ".jpg",
+}
+
+# Taille max d'un fichier à scanner en détail (100 MB).
+# Au-delà c'est un asset de jeu, pas un cheat.
+MAX_CHEAT_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+
 # Extentions inoffensives à ignorer immédiatement (gain de temps massif)
 IGNORED_EXTENSIONS = {
     ".pdf", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
     ".mp3", ".mp4", ".avi", ".mkv", ".wav", ".ogg", ".flac", ".webm",
     ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".csv",
     ".css", ".html", ".htm", ".json", ".xml", ".log", ".md", ".ttf", ".woff", ".woff2",
-    ".dat", ".tmp", ".pak", ".bin", ".cache", ".idx", ".db", ".sqlite", ".store"
+    ".dat", ".tmp", ".pak", ".bin", ".cache", ".idx", ".db", ".sqlite", ".store",
+    # Assets de jeu GTA (volumeux, inutile de les scanner)
+    ".rpf", ".yft", ".ytd", ".ymap", ".ytyp", ".ydr", ".ydd", ".ybn",
+    ".ycd", ".ysc", ".gfx", ".dds",
 }
 
 # Dossiers/Fichiers de type "cache" ou inutiles à sauter instantanément
@@ -599,12 +645,12 @@ def scan_usb_storage_history(progress_callback=None, pct=79):
 # ─────────────────────────────────────────────
 def scan_vm_and_sandbox(progress_callback=None, pct=80):
     """
-    Détecte si le scanner est lancé DEPUIS L'INTÉRIEUR d'une VM ou d'une sandbox.
+    Détecte si le scanner est lancé DEPUIS L'INTÉRIEUR d'une VM, sandbox, ou via RDP/VPS.
     IMPORTANT : On NE flag PAS si VMware est juste installé sur le PC hôte.
-    On détecte uniquement si Windows tourne dans un environnement virtuel actif.
+    On détecte uniquement si Windows tourne dans un environnement virtuel actif OU RDP/VPS.
     """
     if progress_callback:
-        progress_callback("Détection VM/Sandbox", pct, "Vérification de l'environnement d'exécution...")
+        progress_callback("Détection VM/Sandbox/RDP", pct, "Vérification de l'environnement d'exécution...")
 
     vm_score = 0
     details  = []
@@ -708,13 +754,188 @@ def scan_vm_and_sandbox(progress_callback=None, pct=80):
     except Exception:
         pass
 
+    # ══════════════════════════════════════════════════════════════
+    #  RDP / VPS / VPS CLOUD DETECTION
+    # ══════════════════════════════════════════════════════════════
+
+    # ── Vecteur 8 : Session RDP active ──
+    try:
+        is_rdp = False
+        rdp_session_id = os.environ.get("SESSIONNAME", "").lower()
+        if "rdp" in rdp_session_id:
+            is_rdp = True
+            vm_score += 5
+            details.append(f"Session RDP active : SESSIONNAME={os.environ.get('SESSIONNAME', 'N/A')}")
+
+        if not is_rdp:
+            result = subprocess.run(
+                ["query", "session"],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    lower = line.lower()
+                    if "rdp-tcp" in lower and ("active" in lower or "connected" in lower):
+                        vm_score += 5
+                        details.append(f"Session RDP-TCP détectée : {line.strip()}")
+                        is_rdp = True
+                        break
+    except Exception:
+        pass
+
+    # ── Vecteur 9 : Service Terminal / RDP actif ──
+    rdp_services = {
+        "TermService"       : "Terminal Services (RDP)",
+        "SessionEnv"        : "Remote Desktop Configuration",
+        "UmRdpService"      : "Remote Desktop Services UserMode",
+        "rdpdr"             : "RDP Device Redirector",
+        "rdpwsx"            : "RDP Wrapper",
+    }
+    if psutil is not None:
+        try:
+            running_svcs = set()
+            for svc in psutil.win_services_iter():
+                try:
+                    if svc.status() == psutil.STATUS_RUNNING:
+                        running_svcs.add(svc.name().lower())
+                except Exception:
+                    pass
+            for svc_name, desc in rdp_services.items():
+                if svc_name.lower() in running_svcs:
+                    vm_score += 1
+                    details.append(f"Service RDP actif : {svc_name} ({desc})")
+        except Exception:
+            pass
+
+    # ── Vecteur 10 : IP publique type VPS/cloud (pas IP locale 192.168.x.x) ──
+    try:
+        local_ip = None
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        except Exception:
+            pass
+        finally:
+            s.close()
+
+        if local_ip:
+            is_private = (
+                local_ip.startswith("10.") or
+                local_ip.startswith("172.") and 16 <= int(local_ip.split(".")[1]) <= 31 or
+                local_ip.startswith("192.168.") or
+                local_ip.startswith("127.") or
+                local_ip == "0.0.0.0"
+            )
+            # Vérifier aussi les plages de cloud providers
+            cloud_ranges = [
+                ("169.254.", "Link-local (typique cloud/VPS)"),
+                ("100.64.", "CGNAT (typique cloud/VPS)"),
+                ("172.31.", "AWS VPC / cloud private"),
+            ]
+            for prefix, desc in cloud_ranges:
+                if local_ip.startswith(prefix):
+                    vm_score += 3
+                    details.append(f"IP type VPS/cloud détectée : {local_ip} ({desc})")
+                    break
+    except Exception:
+        pass
+
+    # ── Vecteur 11 : Hostname générique de VPS/cloud ──
+    try:
+        hostname = __import__("socket").gethostname().lower()
+        vps_hostname_patterns = ["vps", "server", "cloud", "host", "node", "srv",
+                                 "dedi", "rdp", "remote", "azure", "aws", "gcp"]
+        if any(pat in hostname for pat in vps_hostname_patterns):
+            vm_score += 2
+            details.append(f"Hostname type VPS/cloud : '{hostname}'")
+    except Exception:
+        pass
+
+    # ── Vecteur 12 : UID machine typique cloud/VPS ──
+    try:
+        result = subprocess.run(
+            ["wmic", "csproduct", "get", "UUID"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip() and l.strip().upper() != "UUID"]
+            if lines:
+                machine_uuid = lines[0].lower()
+                vps_uuid_prefixes = [
+                    "00000000-0000-0000-0000-",  # Hyper-V / cloud générique
+                ]
+                if any(machine_uuid.startswith(p) for p in vps_uuid_prefixes):
+                    vm_score += 2
+                    details.append(f"UUID machine type cloud/VPS : {machine_uuid[:20]}...")
+    except Exception:
+        pass
+
+    # ── Vecteur 13 : absence de périphériques USB physiques ──
+    try:
+        result = subprocess.run(
+            ["wmic", "path", "Win32_USBController", "get", "DeviceID"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            usb_count = len([l for l in result.stdout.strip().split("\n") if l.strip().startswith("USB")])
+            if usb_count == 0:
+                vm_score += 1
+                details.append("Aucun contrôleur USB physique détecté (typique VPS/cloud)")
+    except Exception:
+        pass
+
+    # ── Vecteur 14 : Écran résolution faible / résolution VM ──
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        if screen_w <= 1024 and screen_h <= 768:
+            vm_score += 1
+            details.append(f"Résolution écran faible : {screen_w}x{screen_h} (typique VM/RDP)")
+    except Exception:
+        pass
+
+    # ── Vecteur 15 : MAC address vendor (OUI) VPS/cloud ──
+    try:
+        if psutil is not None:
+            addrs = psutil.net_if_addrs()
+            vps_mac_prefixes = {
+                "00:0c:29": "VMware",
+                "00:50:56": "VMware",
+                "08:00:27": "VirtualBox",
+                "52:54:00": "QEMU/KVM",
+                "00:16:3e": "Xen",
+                "00:15:5d": "Hyper-V",
+                "00:1c:42": "Parallels",
+            }
+            for iface, addr_list in addrs.items():
+                for addr in addr_list:
+                    if addr.family == psutil.AF_LINK and addr.address:
+                        mac = addr.address.lower().replace("-", ":")
+                        mac_prefix = mac[:8]
+                        if mac_prefix in vps_mac_prefixes:
+                            vm_score += 2
+                            details.append(f"MAC address VM détectée ({vps_mac_prefixes[mac_prefix]}) : {addr.address}")
+    except Exception:
+        pass
+
     # ── Verdict ──
-    # Score >= 4 = très probablement à l'intérieur d'une VM/sandbox
     is_running_in_vm = vm_score >= 4
+    is_rdp_vps = vm_score >= 6 and vm_score < 10
 
     if progress_callback:
-        verdict_text = "VM/Sandbox détectée !" if is_running_in_vm else "Environnement physique confirmé"
-        progress_callback("Détection VM/Sandbox", pct + 1, f"Score VM : {vm_score} — {verdict_text}")
+        if vm_score >= 10:
+            verdict_text = "RDP/VPS cloud détecté !"
+        elif is_running_in_vm:
+            verdict_text = "VM/Sandbox détectée !"
+        else:
+            verdict_text = "Environnement physique confirmé"
+        progress_callback("Détection VM/Sandbox/RDP", pct + 1, f"Score VM/RDP : {vm_score} — {verdict_text}")
 
     return {
         "is_running_in_vm": is_running_in_vm,
@@ -897,8 +1118,8 @@ def scan_network_connections(progress_callback=None, pct=82):
 # ─────────────────────────────────────────────
 def scan_advanced_dll_injection(progress_callback=None, pct=83):
     """
-    Détecte les injections de DLL suspectes/non-signées dans les processus de jeu cibles.
-    Logique améliorée : une DLL dans le répertoire du jeu = légitime (pas injectée).
+    Détecte les injections de DLL suspectes dans les processus de jeu cibles.
+    Amélioré : scan TOUTES les DLL hors répertoire du jeu, y compris AppData, ProgramData, etc.
     """
     if progress_callback:
         progress_callback("Injection DLL", pct, "Analyse des DLLs chargées dans les processus de jeu...")
@@ -907,6 +1128,29 @@ def scan_advanced_dll_injection(progress_callback=None, pct=83):
     game_processes = {"fivem", "gta5", "rdr2", "ffxiv"}
 
     FIVEDM_DIR_NAMES = {"fivem.app", "fivem", "citizen"}
+
+    # ── Chemins LÉGITIMES (pas flaggués) ──
+    LEGIT_DLL_PATHS = {
+        "c:\\windows\\system32", "c:\\windows\\syswow64", "c:\\windows\\winsxs",
+        "c:\\program files\\nvidia corporation", "c:\\program files (x86)\\nvidia corporation",
+        "c:\\program files\\amd", "c:\\program files (x86)\\amd",
+        "c:\\program files\\microsoft", "c:\\program files (x86)\\microsoft",
+        "c:\\windows\\explorer.exe", "c:\\windows\\systemapps",
+        "c:\\program files\\windowsapps",
+    }
+
+    # ── DLLs Windows légitimes (jamais flagguées) ──
+    LEGIT_WINDOWS_DLLS = {
+        "kernel32.dll", "ntdll.dll", "user32.dll", "gdi32.dll", "advapi32.dll",
+        "ws2_32.dll", "ole32.dll", "oleaut32.dll", "shell32.dll", "shlwapi.dll",
+        "winhttp.dll", "wininet.dll", "crypt32.dll", "rpcrt4.dll", "secur32.dll",
+        "version.dll", "dbghelp.dll", "dbgcore.dll", "d3d11.dll", "d3d9.dll",
+        "dxgi.dll", "opengl32.dll", "glu32.dll", "msvcrt.dll", "msvcp140.dll",
+        "vcruntime140.dll", "ucrtbase.dll", "wintab32.dll", "inputhost.dll",
+        "coremessaging.dll", "coreuicomponents.dll", "windows.ui.xaml.dll",
+        "dwmapi.dll", "uxtheme.dll", "d3d11on12.dll", "d2d1.dll",
+        "textinputframework.dll", "fontext.dll", "mlang.dll",
+    }
 
     if psutil is not None:
         try:
@@ -927,36 +1171,60 @@ def scan_advanced_dll_injection(progress_callback=None, pct=83):
                                 path_lower = path.lower()
                                 filename = os.path.basename(path)
 
+                                # Ignorer DLLs Windows légitimes
+                                if filename.lower() in LEGIT_WINDOWS_DLLS:
+                                    continue
+
+                                # Ignorer DLLs dans le répertoire du jeu
                                 if proc_dir and path_lower.startswith(proc_dir):
                                     continue
 
+                                # Ignorer DLLs dans les sous-dossiers FiveM légitimes
                                 is_fivem_sub = any(fd in path_lower for fd in FIVEDM_DIR_NAMES)
                                 if is_fivem_sub and ("\\bin\\" in path_lower or "\\citizen\\" in path_lower or "\\clr2\\" in path_lower):
                                     continue
 
-                                is_suspicious_path = any(kw in path_lower for kw in ["\\temp\\", "\\downloads\\", "\\appdata\\local\\temp"])
+                                # Ignorer DLLs dans les chemins légitimes connus
+                                if any(path_lower.startswith(lp) for lp in LEGIT_DLL_PATHS):
+                                    continue
+
+                                # ── NOUVEAU : Vérifier la signature pour TOUTE DLL hors zone légitime ──
                                 is_unsigned = False
+                                is_suspicious_name = False
+                                is_in_appdata = "\\appdata\\" in path_lower
+                                is_in_programdata = "\\programdata\\" in path_lower
+                                is_in_users = "\\users\\" in path_lower and "\\appdata\\" not in path_lower
 
-                                if is_suspicious_path:
-                                    try:
-                                        if any(own in filename.lower() for own in LEGITIMATE_FRAMEWORKS):
-                                            continue
+                                # Nom de DLL suspect (commun pour les cheats)
+                                suspicious_dll_names = {
+                                    "dinput8.dll", "dinput.dll", "dsound.dll",
+                                    "winhttp.dll", "version.dll", "dbghelp.dll",
+                                }
+                                if filename.lower() in suspicious_dll_names and is_fivem_sub:
+                                    is_suspicious_name = True
 
-                                        from src.authenticode import check_authenticode_signature
-                                        sig = check_authenticode_signature(path)
-                                        if not sig.get("signed", False):
-                                            is_unsigned = True
-                                    except:
+                                try:
+                                    if any(own in filename.lower() for own in LEGITIMATE_FRAMEWORKS):
+                                        continue
+
+                                    from src.authenticode import check_authenticode_signature
+                                    sig = check_authenticode_signature(path)
+                                    if not sig.get("signed", False):
                                         is_unsigned = True
+                                except:
+                                    is_unsigned = True
 
-                                if is_unsigned:
+                                # Flag si : non signée ET dans un chemin suspect (AppData, ProgramData, Downloads, Temp)
+                                should_flag = is_unsigned and (is_in_appdata or is_in_programdata or is_in_users or is_suspicious_name)
+
+                                if should_flag:
                                     traces.append({
                                         "process_name": pname,
                                         "pid": pid,
                                         "dll_name": filename,
                                         "dll_path": path,
-                                        "severity": "CRITICAL",
-                                        "description": f"DLL non signée suspecte injectée dans {pname} (PID: {pid}) : {filename} ({path})"
+                                        "severity": "CRITICAL" if is_in_appdata else "HIGH",
+                                        "description": f"DLL non signée injectée dans {pname} (PID: {pid}) : {filename} ({path})"
                                     })
                     except Exception:
                         pass
@@ -1067,6 +1335,13 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
             "steam", "epic games", "rockstar", "battle.net", "blizzard",
             "medal", "obs", "xampp", "visual studio", "vs code",
             "program files", "windowsapps",
+            "nvidia", "amd", "intel", "realtek",
+            "microsoft", "windows defender", "msmpeng",
+            "epicinstaller", "epic online",
+            "brave", "bravebrowser",
+            "bluestacks", "onendrive",
+            "riot games", "valorant", "vanguard",
+            "translucenttb", "widgetboard",
         ])
         context_penalty = 0
         if is_known_app and not is_in_temp:
@@ -1693,6 +1968,378 @@ def scan_hwid_crosscheck(progress_callback=None, pct=87):
     return result
 
 
+# ─────────────────────────────────────────────
+# FORENSIQUE : DÉTECTION CLEANERS/SPOOFERS FIVEM (NitWitcleaner & similaires)
+# Découvert via reverse engineering + analyse VM (dossier spoofer/).
+# Conçu ANTI-FAUX-POSITIFS : chaque indicateur exige une signature forte
+# (hosts/registre) OU une combinaison de signaux faibles (≥3 traces absentes).
+# ─────────────────────────────────────────────
+XBOXLIVE_DOMAINS = (
+    "xboxlive.com",
+    "user.auth.xboxlive.com",
+    "presence-heartbeat.xboxlive.com",
+)
+
+FIVEM_AUTH_FILES = (
+    "CitizenFX.ini",
+    "steam_api64.dll",
+    "profiles.dll",
+    "caches.XML",
+)
+
+CLEANER_TRACE_KEYS = (
+    (winreg.HKEY_CURRENT_USER, r"Software\WinRAR\ArcHistory"),
+    (winreg.HKEY_CURRENT_USER, r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"),
+    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\AppSwitched"),
+    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\ShowJumpView"),
+    (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings"),
+    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"),
+)
+
+
+def _reg_key_exists(hive, path):
+    try:
+        k = winreg.OpenKey(hive, path)
+        winreg.CloseKey(k)
+        return True
+    except Exception:
+        return False
+
+
+def scan_spoofer_cleaner(progress_callback=None, pct=90):
+    """
+    Détecte les effets résiduels d'un cleaner/spoofer FiveM de type NitWitcleaner.
+    Le malware nettoie ses scripts mais JAMAIS ses effets (hosts, registre, FiveM)
+    → détection "après coup" fiable. Seuils volontairement stricts pour éviter
+    les faux positifs :
+      - hosts xboxlive : ≥2 occurrences OU ≥2 domaines distincts
+      - MSLicensing    : les 2 sous-clés absentes ET la clé parente présente
+      - FiveM          : uniquement si FiveM est installé ET ≥3 fichiers manquants
+      - batch %TEMP%   : pattern de dossier <hex>.tmp>\\<hex>.tmp> + contenu + <24h
+      - traces         : ≥3 clés de traces absentes (signaux faibles combinés)
+    """
+    if progress_callback:
+        progress_callback("Cleaner/Spoofer FiveM", pct, "Vérification des effets résiduels (hosts, licence, FiveM, traces)...")
+
+    findings = []
+    score = 0
+
+    # ── 1. Fichier hosts pollué avec domaines Xbox Live (signature forte) ──
+    hosts_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "drivers", "etc", "hosts")
+    try:
+        if os.path.isfile(hosts_path):
+            with open(hosts_path, "r", encoding="utf-8", errors="ignore") as f:
+                hosts_lower = f.read().lower()
+            present_domains = [d for d in XBOXLIVE_DOMAINS if d in hosts_lower]
+            total_entries = hosts_lower.count("xboxlive.com")
+            if len(present_domains) >= 2 or total_entries >= 2:
+                score += 60
+                findings.append({
+                    "rule": "hosts_xboxlive",
+                    "severity": "CRITICAL",
+                    "title": "Fichier hosts pollué (blocage Xbox Live)",
+                    "detail": (f"Le fichier hosts contient {total_entries} entrée(s) bloquant "
+                               f"Xbox Live ({', '.join(present_domains)}). Signature du cleaner "
+                               f"NitWitcleaner (contournement de ban FiveM).")
+                })
+    except Exception:
+        pass
+
+    # ── 2. Licence MSLicensing supprimée (garde : clé parente doit exister) ──
+    mslic_root = r"SOFTWARE\Microsoft\MSLicensing"
+    if _reg_key_exists(winreg.HKEY_LOCAL_MACHINE, mslic_root):
+        hwid_gone = not _reg_key_exists(winreg.HKEY_LOCAL_MACHINE, mslic_root + r"\HardwareID")
+        store_gone = not _reg_key_exists(winreg.HKEY_LOCAL_MACHINE, mslic_root + r"\Store")
+        if hwid_gone and store_gone:
+            score += 50
+            findings.append({
+                "rule": "mslicensing_missing",
+                "severity": "CRITICAL",
+                "title": "Clés de licence Microsoft supprimées",
+                "detail": ("HKLM\\SOFTWARE\\Microsoft\\MSLicensing\\HardwareID et \\Store sont absents "
+                           "alors que la clé parente existe. Suppression typique d'un cleaner anti-ban "
+                           "FiveM (reset licence Xbox).")
+            })
+
+    # ── 3. Fichiers d'authentification FiveM manquants (uniquement si FiveM installé) ──
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    fivem_app = os.path.join(local_appdata, "FiveM", "FiveM.app")
+    if os.path.isdir(fivem_app):
+        missing = [fn for fn in FIVEM_AUTH_FILES if not os.path.exists(os.path.join(fivem_app, fn))]
+        if len(missing) >= 3:
+            score += 45
+            findings.append({
+                "rule": "fivem_auth_missing",
+                "severity": "HIGH",
+                "title": "Fichiers d'authentification FiveM supprimés",
+                "detail": (f"FiveM est installé mais {len(missing)} fichier(s) d'auth sont absents : "
+                           f"{', '.join(missing)}. Réinitialisation typique de clean/ban.")
+            })
+
+    # ── 4. Script batch cleaner dans %TEMP%\<hex>.tmp\<hex>.tmp\ (fenêtre courte) ──
+    temp_dir = os.environ.get("TEMP", "")
+    try:
+        if temp_dir and os.path.isdir(temp_dir):
+            hex_tmp_re = re.compile(r'^[0-9A-Fa-f]{3,8}\.tmp$')
+            now = time.time()
+            try:
+                top_dirs = os.listdir(temp_dir)
+            except OSError:
+                top_dirs = []
+            for d1 in top_dirs:
+                if not hex_tmp_re.match(d1):
+                    continue
+                lvl2 = os.path.join(temp_dir, d1)
+                try:
+                    sub_dirs = os.listdir(lvl2)
+                except OSError:
+                    continue
+                for d2 in sub_dirs:
+                    if not hex_tmp_re.match(d2):
+                        continue
+                    batch_dir = os.path.join(lvl2, d2)
+                    try:
+                        for fname in os.listdir(batch_dir):
+                            if not fname.lower().endswith(".bat"):
+                                continue
+                            batch_path = os.path.join(batch_dir, fname)
+                            try:
+                                if now - os.path.getmtime(batch_path) > 24 * 3600:
+                                    continue
+                                with open(batch_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read(65536).lower()
+                                has_kill = "taskkill" in content
+                                has_reg = "reg delete" in content
+                                has_fivem = "fivem" in content or "xboxlive" in content or "mslicensing" in content
+                                if (has_kill and has_reg) or (has_fivem and has_reg):
+                                    score += 40
+                                    findings.append({
+                                        "rule": "temp_cleaner_batch",
+                                        "severity": "CRITICAL",
+                                        "title": "Script batch cleaner détecté dans %TEMP%",
+                                        "detail": (f"{fname} dans {batch_dir} (créé il y a < 24h) : contient "
+                                                   f"taskkill + REG DELETE / FiveM. Pattern du loader NitWitcleaner.")
+                                    })
+                                    break
+                            except Exception:
+                                continue
+                    except OSError:
+                        continue
+    except Exception:
+        pass
+
+    # ── 5. Nettoyage de traces anti-forensique (combinaison ≥3 clés absentes) ──
+    missing_traces = [path for hive, path in CLEANER_TRACE_KEYS if not _reg_key_exists(hive, path)]
+    if len(missing_traces) >= 3:
+        score += 20
+        findings.append({
+            "rule": "trace_cleanup",
+            "severity": "MEDIUM",
+            "title": "Traces d'activité anormalement absentes",
+            "detail": (f"{len(missing_traces)}/6 clés de traces système absentes "
+                       f"({', '.join(p[-30:] for p in missing_traces[:3])}...). "
+                       f"Nettoyage anti-forensique possible (signal faible, à corréler).")
+        })
+
+    if progress_callback:
+        progress_callback("Cleaner/Spoofer FiveM", pct + 1,
+                          f"{len(findings)} indicateur(s) de cleaner détecté(s) (score {score})")
+
+    return {"score": score, "findings": findings}
+
+
+def scan_fivem_lua_js_cheat_scripts(progress_callback=None, pct=88):
+    """
+    Scanne les répertoires FiveM (data/cache, cache/subprocess, data/nui, plugins)
+    pour des scripts Lua/JS potentiellement liés à des cheats (menus, executors).
+    Nitwit et autres menus modernes s'exécutent comme des scripts Lua injectés via executor.
+    """
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    user_profile  = os.environ.get("USERPROFILE", "")
+    appdata       = os.environ.get("APPDATA", "")
+
+    # On ÉVITE le dossier cache racine et game-storage (30 Go d'assets GTA)
+    # On ne cible que subprocess, nui et plugins (fichiers petits)
+    fivem_dirs = [
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "cache", "subprocess"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "nui"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
+    ]
+
+    # Patterns de noms de fichiers suspects dans les dossiers FiveM
+    SUSPICIOUS_SCRIPT_PATTERNS = [
+        # Menu / executor names
+        "nitwit", "quasar", "sapphire", "jaguar", "venom", "onyx", "ares",
+        "vmenu", "vrp", "esx", "storm", "fluxus", "scripthook", "luaexec",
+        "executor", "menu.lua", "cheat", "hack", "exploit", "inject",
+        "aimbot", "wallhack", "esp", "noclip", "godmode",
+    ]
+
+    # Contenu Lua/JS suspect (lu dans le fichier)
+    LUA_SUSPICIOUS_CONTENT = [
+        "menu.add_checkbox", "menu.add_button", "menu.toggle",
+        "Citizen.CreateThread", "TriggerServerEvent",
+        "RegisterNetEvent", "AddEventHandler",
+        "SetEntityInvincible", "SetPlayerInvisible", "SetPlayerInvincible",
+        "GiveWeaponToPed", "SetPedArmour",
+        "NetworkExplodeVehicle", "AddExplosion",
+    ]
+
+    JS_SUSPICIOUS_CONTENT = [
+        "mp.game", " natives.", "require(",
+        "mp.players.local", "mp.vehicles",
+        "eval(", "Function(",
+    ]
+
+    suspects = []
+    scanned = 0
+
+    def _scan_dir_lua(d):
+        nonlocal scanned
+        if not os.path.isdir(d):
+            return
+        for root, dirs, files in os.walk(d):
+            depth = root.lower().count(os.sep) - d.lower().count(os.sep)
+            if depth > 3:
+                dirs.clear()
+                continue
+            for fname in files:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in (".lua", ".js", ".ts", ".jsx", ".tsx", ".json", ".cfg", ".txt", ".xml"):
+                    continue
+                full = os.path.join(root, fname)
+                scanned += 1
+                try:
+                    if os.path.getsize(full) > 1 * 1024 * 1024:
+                        continue
+                    with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read(65536)
+                    content_lower = content.lower()
+                    name_lower = fname.lower()
+                    reasons = []
+                    severity = "LOW"
+
+                    for pat in SUSPICIOUS_SCRIPT_PATTERNS:
+                        if pat in name_lower:
+                            reasons.append(f"Nom de fichier suspect: '{pat}'")
+                            severity = "HIGH"
+                            break
+
+                    if ext in (".lua", ".cfg"):
+                        for pat in LUA_SUSPICIOUS_CONTENT:
+                            if pat.lower() in content_lower:
+                                reasons.append(f"Contenu Lua suspect: '{pat}'")
+                                if severity == "LOW":
+                                    severity = "MEDIUM"
+
+                    if ext in (".js", ".ts", ".jsx", ".tsx"):
+                        for pat in JS_SUSPICIOUS_CONTENT:
+                            if pat.lower() in content_lower:
+                                reasons.append(f"Contenu JS suspect: '{pat}'")
+                                if severity == "LOW":
+                                    severity = "MEDIUM"
+
+                    # Si le nom est dans un cache/subprocess ET contient du code suspect
+                    if "subprocess" in root.lower() and ext in (".lua", ".js"):
+                        reasons.append(f"Script exécutable trouvé dans cache/subprocess")
+                        if severity == "LOW":
+                            severity = "MEDIUM"
+
+                    if reasons:
+                        suspects.append({
+                            "file": full,
+                            "name": fname,
+                            "reasons": reasons,
+                            "severity": severity,
+                            "size": os.path.getsize(full),
+                        })
+                except Exception:
+                    continue
+
+    if progress_callback:
+        progress_callback("Scripts Lua/JS FiveM", pct, f"Scan des répertoires FiveM pour scripts suspects...")
+
+    for d in fivem_dirs:
+        _scan_dir_lua(d)
+
+    return {"suspects": suspects, "scanned_count": scanned}
+
+
+def scan_process_hollowing(progress_callback=None, pct=89):
+    """
+    Détecte le process hollowing sur GTA5.exe / FiveM.exe / FiveM_*.exe.
+    Vérifie la chaîne de parent PID pour détecter des lanceurs anormaux
+    (cmd.exe, powershell.exe, python.exe, ou inconnus qui lancent GTA5/FiveM).
+    """
+    import psutil as _psutil
+    if _psutil is None:
+        return {"hollowing_detected": False, "details": [], "processes_checked": 0}
+
+    TARGET_PROCESSES = {"gta5.exe", "fivem.exe"}
+    # Parents suspects : un cheat loader lance FiveM/GTA via cmd, powershell, python, ou un exe inconnu
+    SUSPICIOUS_PARENTS = {"cmd.exe", "powershell.exe", "pwsh.exe", "python.exe", "python3.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe"}
+
+    if progress_callback:
+        progress_callback("Process Hollowing", pct, "Vérification chaîne de processus GTA5/FiveM...")
+
+    details = []
+    checked = 0
+    hollowing_detected = False
+
+    try:
+        for proc in _psutil.process_iter(['pid', 'name', 'ppid']):
+            try:
+                info = proc.info
+                pname = (info.get("name") or "").lower()
+                if pname not in TARGET_PROCESSES:
+                    continue
+                checked += 1
+                ppid = info.get("ppid")
+                if not ppid or ppid == 0:
+                    continue
+                try:
+                    parent = _psutil.Process(ppid)
+                    parent_name = (parent.name() or "").lower()
+                except Exception:
+                    continue
+
+                # Vérifier si le parent est un processus suspect
+                is_suspicious = False
+                reason = ""
+                if parent_name in SUSPICIOUS_PARENTS:
+                    is_suspicious = True
+                    reason = f"Parent suspect: {parent_name} (PID {ppid})"
+                elif parent_name not in ("fivem.exe", "explorer.exe", "steam.exe", "epicgameslauncher.exe", "cmd.exe"):
+                    # Parent inconnu qui n'est ni un launcher ni explorer
+                    is_suspicious = True
+                    reason = f"Parent inconnu: {parent_name} (PID {ppid})"
+
+                if is_suspicious:
+                    hollowing_detected = True
+                    try:
+                        parent_cmdline = " ".join(parent.cmdline()[:3]) if hasattr(parent, 'cmdline') else "N/A"
+                    except Exception:
+                        parent_cmdline = "N/A"
+                    details.append({
+                        "process": pname,
+                        "pid": info["pid"],
+                        "parent_name": parent_name,
+                        "parent_pid": ppid,
+                        "parent_cmdline": parent_cmdline,
+                        "reason": reason,
+                    })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return {
+        "hollowing_detected": hollowing_detected,
+        "details": details,
+        "processes_checked": checked,
+    }
+
+
 def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
     """
     Examine les en-têtes PE d'un exécutable pour détecter des anomalies de virtualisation de code / packer (ex: VMProtect/Themida/Custom Stub).
@@ -1948,6 +2595,108 @@ def _scan_archive_contents(archive_path: str):
 
     return suspects_found
 
+
+def _is_password_protected_archive(file_path: str) -> dict:
+    """
+    Détecte si une archive (.zip, .7z, .rar) est protégée par mot de passe.
+    90% des cheats sont distribués dans des archives protégées pour éviter
+    la détection antivirus. Une archive protégée = suspecte par défaut.
+
+    Retourne {'is_protected': True, 'method': '...', 'reason': '...'} ou None.
+    """
+    ext = os.path.splitext(file_path.lower())[1]
+
+    if ext == ".zip":
+        try:
+            import zipfile
+            with zipfile.ZipFile(file_path, 'r') as z:
+                # Si on peut lire la liste, vérifier les flags d'encryption
+                for item in z.infolist():
+                    # Flag bit 0 du compress_type = encrypted
+                    if item.flag_bits & 0x1:
+                        return {
+                            "is_protected": True,
+                            "method": "ZIP Encryption (flag bit 0)",
+                            "reason": "Archive ZIP chiffrée — couramment utilisée pour distribuer des cheats hors détection antivirus"
+                        }
+                # Aussi : essayer de lire le premier fichier sans mot de passe
+                try:
+                    first_file = None
+                    for name in z.namelist():
+                        if not name.endswith('/'):
+                            first_file = name
+                            break
+                    if first_file:
+                        z.read(first_file)
+                except RuntimeError as e:
+                    if "password" in str(e).lower() or "encrypted" in str(e).lower():
+                        return {
+                            "is_protected": True,
+                            "method": "ZIP Password (RuntimeError)",
+                            "reason": f"Archive ZIP protégée par mot de passe — impossible de lire '{first_file}' sans mot de passe"
+                        }
+                except Exception:
+                    pass
+        except zipfile.BadZipFile:
+            pass
+        except Exception:
+            pass
+
+    elif ext == ".7z":
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(32)
+            # 7z magic: bytes 0-5 = "7z\xbc\xaf\x27\x1c"
+            if len(header) >= 32 and header[:6] == b'7z\xbc\xaf\x27\x1c':
+                # Byte 25 du header 7z: 0x03 = encrypted names, 0x20+ = encrypted
+                if len(header) > 25 and (header[25] & 0x03 or header[25] & 0x20):
+                    return {
+                        "is_protected": True,
+                        "method": "7z Encryption (header byte)",
+                        "reason": "Archive 7z chiffrée — couramment utilisée pour distribuer des cheats hors détection antivirus"
+                    }
+                # Aussi : vérifier si les noms de fichiers sont chiffrés (non lisibles)
+                try:
+                    import py7zr
+                    with py7zr.SevenZipFile(file_path, 'r') as sz:
+                        sz.getnames()  # Si ça lève une exception, c'est protégé
+                except Exception as e:
+                    if "password" in str(e).lower() or "encrypted" in str(e).lower():
+                        return {
+                            "is_protected": True,
+                            "method": "7z Password (py7zr)",
+                            "reason": f"Archive 7z protégée par mot de passe — {str(e)[:100]}"
+                        }
+                except ImportError:
+                    pass
+        except Exception:
+            pass
+
+    elif ext == ".rar":
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(24)
+            # RAR5 magic: bytes 0-6 = "Rar!\x1a\x07\x01\x00"
+            if len(header) >= 7 and header[:4] == b'Rar!':
+                # RAR5: header[23] contient des flags, bit 3 = encrypted
+                if len(header) > 23 and (header[23] & 0x08):
+                    return {
+                        "is_protected": True,
+                        "method": "RAR5 Encryption (header flag)",
+                        "reason": "Archive RAR chiffrée — couramment utilisée pour distribuer des cheats hors détection antivirus"
+                    }
+                # RAR4: header[10] contient des flags
+                if len(header) > 10 and (header[10] & 0x04):
+                    return {
+                        "is_protected": True,
+                        "method": "RAR4 Encryption (header flag)",
+                        "reason": "Archive RAR chiffrée — couramment utilisée pour distribuer des cheats hors détection antivirus"
+                    }
+        except Exception:
+            pass
+
+    return None
+
 def scan_windows_defender_threats(progress_callback=None, pct=74):
     """
     Interroge l'historique des menaces de Windows Defender (Get-MpThreatDetection).
@@ -2026,11 +2775,11 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
     # ── Dossiers CHIRURGICAUX uniquement — jamais de scan en masse d'AppData entier
     standard_dirs = [
-        # FiveM : dossiers ciblés uniquement
+        # FiveM : dossiers ciblés uniquement (on ÉVITE cache/game-storage = 30 Go d'assets)
         os.path.join(local_appdata, "FiveM", "FiveM.app", "plugins"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "nui"),
+        os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "cache", "subprocess"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
-        os.path.join(appdata, "FiveM"),
 
         # Bureau et Téléchargements (source principale de cheats)
         os.path.join(user_profile, "Desktop"),
@@ -2078,6 +2827,8 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
     def _get_depth_limit(directory: str) -> int:
         d_lower = directory.lower()
         if "fivem.app" in d_lower or "cfx.re" in d_lower:
+            return 3
+        if "fivem" in d_lower and "subprocess" in d_lower:
             return 2
         if "recent" in d_lower:
             return 1
@@ -2096,7 +2847,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
             return "[REDACTED]"
         return name
 
-    MAX_ARCHIVE_SIZE = 50 * 1024 * 1024  # 50 MB — les archives plus grosses = faux positifs peu probables
+    MAX_ARCHIVE_SIZE = 20 * 1024 * 1024  # 20 MB — les cheats sont rarement plus gros
 
     def _scan_one_dir(directory, pct):
         local_suspects = []
@@ -2170,6 +2921,14 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
                     full_path = os.path.join(root, file)
 
+                    # ── Skip fichiers > 100 MB (assets de jeu GTA, pas des cheats)
+                    try:
+                        fsize_quick = os.path.getsize(full_path)
+                        if fsize_quick > MAX_CHEAT_FILE_SIZE:
+                            continue
+                    except Exception:
+                        continue
+
                     # ── Progress : montrer le disque + nb fichiers + nom sanitisé (jamais de chemin complet)
                     if progress_callback and _file_count % 50 == 0:
                         display_name = _sanitize_display(file)
@@ -2223,6 +2982,16 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                                 "reason": match.get("reason", f"Signature suspecte '{file}' sur {_dir_drive}")
                             })
                         elif ext in ARCHIVE_EXTENSIONS:
+                            pw_result = _is_password_protected_archive(full_path)
+                            if pw_result:
+                                local_suspects.append({
+                                    "file": file,
+                                    "path": full_path,
+                                    "directory": root,
+                                    "drive": _dir_drive,
+                                    "severity": "CRITICAL",
+                                    "reason": f"Archive PROTEGEE PAR MOT DE PASSE '{file}' - {pw_result.get('reason', 'distribution de cheat')}"
+                                })
                             archive_suspects = _scan_archive_contents(full_path)
                             for fname, inner_path, reason in archive_suspects:
                                 local_suspects.append({
@@ -3021,8 +3790,8 @@ def run_system_scan(progress_callback=None):
     # NOTE: On n'utilise PAS 'with' (qui attend tous les threads) — on utilise
     # des timeouts individuels pour éviter le blocage si un thread forensique est lent.
     _FORENSIC_TIMEOUT = 45  # 45s max par analyse forensique
-    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist, VM, Amcache, Net, DLL)...")
-    forensique_ex = ThreadPoolExecutor(max_workers=14)
+    step("Forensique Système", 73, "Lancement des analyses forensiques (Prefetch, Defender, USN, USB, BAM, UserAssist, VM, Amcache, Net, DLL, Scripts, Hollowing)...")
+    forensique_ex = ThreadPoolExecutor(max_workers=16)
     try:
         f_pf   = forensique_ex.submit(scan_windows_prefetch, progress_callback, 73)
         f_def  = forensique_ex.submit(scan_windows_defender_threats, progress_callback, 74)
@@ -3039,6 +3808,9 @@ def run_system_scan(progress_callback=None):
         f_svc  = forensique_ex.submit(scan_eventlog_new_services, progress_callback, 85)
         f_cnh  = forensique_ex.submit(scan_conhost_parent_suspicious, progress_callback, 86)
         f_hwid = forensique_ex.submit(scan_hwid_crosscheck, progress_callback, 87)
+        f_lua = forensique_ex.submit(scan_fivem_lua_js_cheat_scripts, progress_callback, 88)
+        f_hol = forensique_ex.submit(scan_process_hollowing, progress_callback, 89)
+        f_cleaner = forensique_ex.submit(scan_spoofer_cleaner, progress_callback, 90)
 
         try:
             prefetch_res = f_pf.result(timeout=_FORENSIC_TIMEOUT)
@@ -3109,6 +3881,21 @@ def run_system_scan(progress_callback=None):
             hwid_crosscheck = f_hwid.result(timeout=_FORENSIC_TIMEOUT)
         except Exception:
             hwid_crosscheck = {"spoof_detected": False, "spoof_details": []}
+
+        try:
+            lua_js_result = f_lua.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            lua_js_result = {"suspects": [], "scanned_count": 0}
+
+        try:
+            hollowing_result = f_hol.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            hollowing_result = {"hollowing_detected": False, "details": [], "processes_checked": 0}
+
+        try:
+            cleaner_result = f_cleaner.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            cleaner_result = {"score": 0, "findings": []}
     finally:
         forensique_ex.shutdown(wait=False, cancel_futures=True)
 
@@ -3136,6 +3923,24 @@ def run_system_scan(progress_callback=None):
         step("VM/Sandbox", 81, f"✅ Environnement physique confirmé (Score VM : {vm_sandbox_result.get('vm_score')}/25)")
 
     step("Forensique Amcache", 82, f"{len(amcache_traces)} trace(s) Amcache.hve détectée(s)")
+
+    # ── Info Scripts Lua/JS dans system_info ──
+    lua_js_suspects = lua_js_result.get("suspects", [])
+    system_info["fivem_lua_js_suspect_count"] = len(lua_js_suspects)
+    system_info["fivem_lua_js_scanned"] = lua_js_result.get("scanned_count", 0)
+    if lua_js_suspects:
+        step("Scripts FiveM", 88, f"⚠️ {len(lua_js_suspects)} script(s) Lua/JS suspect(s) trouvé(s) dans FiveM")
+    else:
+        step("Scripts FiveM", 88, f"✅ {lua_js_result.get('scanned_count', 0)} script(s) FiveM vérifié(s), aucun suspect")
+
+    # ── Info Process Hollowing dans system_info ──
+    system_info["process_hollowing_detected"] = hollowing_result.get("hollowing_detected", False)
+    system_info["process_hollowing_details"] = hollowing_result.get("details", [])
+    system_info["process_hollowing_checked"] = hollowing_result.get("processes_checked", 0)
+    if hollowing_result.get("hollowing_detected"):
+        step("Process Hollowing", 89, f"⚠️ Chaîne de processus suspecte détectée sur {len(hollowing_result.get('details', []))} processus")
+    else:
+        step("Process Hollowing", 89, f"✅ {hollowing_result.get('processes_checked', 0)} processus FiveM/GTA vérifié(s)")
 
     # ── 83% : Regroupement
     step("Regroupement Apps", 82, "Regroupement des sous-processus par Application...")
@@ -3467,6 +4272,30 @@ def run_system_scan(progress_callback=None):
             }
         })
 
+    # ── Traces cleaner/spoofer FiveM (NitWitcleaner & similaires) ──
+    # Scores volontairement calibrés : seule une signature forte (hosts, licence,
+    # batch temp) approche le seuil CHEATER ; le signal faible (traces) reste info.
+    _cleaner_risk_map = {"CRITICAL": 80, "HIGH": 65, "MEDIUM": 45}
+    for trace in cleaner_result.get("findings", []):
+        applications.append({
+            "app_name"        : trace["rule"],
+            "exe_path"        : "CLEANER_EFFECT_DETECTED",
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "SpooferCleanerEffect"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "CLEANER_SPOOFER_EFFECT",
+            "risk_assessment" : {
+                "risk_score"  : _cleaner_risk_map.get(trace["severity"], 50),
+                "observations": [{
+                    "severity"   : trace["severity"],
+                    "title"      : trace["title"],
+                    "description": trace["detail"]
+                }]
+            }
+        })
+
     # ── HWID spoof actif → augmenter le score global si détecté
     if hwid_crosscheck.get("spoof_detected"):
         for detail in hwid_crosscheck.get("spoof_details", []):
@@ -3494,11 +4323,12 @@ def run_system_scan(progress_callback=None):
     step("Scan Terminé", 100, (
         f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | "
         f"{len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(amcache_traces)} Amcache | "
-        f"{len(injected_dll_traces)} DLL Inj | {len(uuid_traces)} UUID | {len(eventlog_svc_traces)} Svc7045"
+        f"{len(injected_dll_traces)} DLL Inj | {len(uuid_traces)} UUID | {len(eventlog_svc_traces)} Svc7045 | "
+        f"{len(cleaner_result.get('findings', []))} Cleaner"
     ))
 
     return {
-        "timestamp"        : time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp"        : time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "hwid"             : hwid,
         "system_info"      : system_info,
         "disk_performance" : {"read_speed_mb_s": disk_speed},
@@ -3520,6 +4350,7 @@ def run_system_scan(progress_callback=None):
             "uuid_traces_count"       : len(uuid_traces),
             "eventlog_svc_traces_count": len(eventlog_svc_traces),
             "conhost_traces_count"    : len(conhost_traces),
+            "cleaner_effects_count"   : len(cleaner_result.get("findings", [])),
             "hwid_spoof_detected"     : hwid_crosscheck.get("spoof_detected", False),
             "drives_scanned"          : len(mounted_drives)
         },
@@ -3537,6 +4368,7 @@ def run_system_scan(progress_callback=None):
         "eventlog_svc_traces" : eventlog_svc_traces,
         "conhost_traces"      : conhost_traces,
         "hwid_crosscheck"     : hwid_crosscheck,
+        "cleaner_effects"     : cleaner_result.get("findings", []),
         "vm_sandbox"          : vm_sandbox_result,
         "risk_summary"        : risk_summary,
         "applications"     : applications

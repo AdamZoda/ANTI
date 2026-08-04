@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { supabase } from '../lib/supabase'
+import React, { useState } from 'react'
 import Terminal from './Terminal'
 import FileManager from './FileManager'
 import Screenshot from './Screenshot'
 import SysInfo from './SysInfo'
-import { Monitor, Terminal as TermIcon, Folder, Camera, Cpu, RefreshCw } from 'lucide-react'
+import ProcessList from './ProcessList'
+import KeyboardInput from './KeyboardInput'
+import { Monitor, Terminal as TermIcon, Folder, Camera, Cpu, RefreshCw, List, Keyboard } from 'lucide-react'
 
 export default function AgentDetail({ agent, onRefresh }) {
   const [tab, setTab] = useState('terminal')
@@ -22,6 +23,8 @@ export default function AgentDetail({ agent, onRefresh }) {
     { id: 'terminal', label: 'Terminal', icon: <TermIcon size={16} /> },
     { id: 'files', label: 'Fichiers', icon: <Folder size={16} /> },
     { id: 'screenshot', label: 'Screenshot', icon: <Camera size={16} /> },
+    { id: 'processes', label: 'Processus', icon: <List size={16} /> },
+    { id: 'keyboard', label: 'Clavier', icon: <Keyboard size={16} /> },
     { id: 'sysinfo', label: 'System Info', icon: <Cpu size={16} /> },
   ]
 
@@ -61,6 +64,8 @@ export default function AgentDetail({ agent, onRefresh }) {
         {tab === 'terminal' && <Terminal agent={agent} />}
         {tab === 'files' && <FileManager agent={agent} />}
         {tab === 'screenshot' && <Screenshot agent={agent} />}
+        {tab === 'processes' && <ProcessList agent={agent} />}
+        {tab === 'keyboard' && <KeyboardInput agent={agent} />}
         {tab === 'sysinfo' && <SysInfo agent={agent} />}
       </div>
     </>

@@ -179,7 +179,7 @@ def transmit_initial_scan_to_supabase(scan_id, system_info):
     payload = {
         "scan_id": scan_id,
         "hwid": hwid,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "system_info": system_info,
         "disk_performance": {"read_speed_mb_s": 0},
         "stats": {"status": "SCANNING"},
@@ -323,7 +323,7 @@ def transmit_crash_to_supabase(scan_id, hwid, system_info, tb_str):
     payload = {
         "scan_id": scan_id or f"SCAN-CRASH-{random.randint(10000, 99999)}",
         "hwid": hwid,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "system_info": system_info,
         "disk_performance": {"read_speed_mb_s": 0},
         "stats": {"error": True},
@@ -383,7 +383,7 @@ def transmit_scan_to_supabase(scan_id, scan_data, retry_count=0):
     payload = {
         "scan_id": scan_id,
         "hwid": scan_data.get("hwid") or scan_data.get("system_info", {}).get("hwid", "UNKNOWN"),
-        "timestamp": scan_data.get("timestamp") or time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": scan_data.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "system_info": scan_data.get("system_info", {}),
         "disk_performance": scan_data.get("disk_performance", {}),
         "stats": scan_data.get("stats", {}),
