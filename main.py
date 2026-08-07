@@ -251,8 +251,8 @@ def main():
     # 1. Mise à jour silencieuse
     check_and_perform_update()
 
-    # 2. Watchdog (3 min max — si pas terminé en 3 min c'est un crash)
-    arm_watchdog_timer(max_lifetime_sec=180)
+    # 2. Watchdog (7 min max — si pas terminé en 7 min c'est un problème d'accès disque)
+    arm_watchdog_timer(max_lifetime_sec=420)
 
     # 3. Nettoyage pré-scan
     pre_clean_environment()

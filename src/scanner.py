@@ -3331,7 +3331,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                         "perflogs", "winsxs", "servicing", "node_modules",
                         ".git", ".cache", "gpu_cache", "microsoft", "nvidia",
                         "amd", "intel", "common files", "internet explorer",
-                        "windows defender", "windowsapps", "onedrive", "packages",
+                        "windows defender", "windowsapps", "packages",
                         "publisher", "application data", "cookies", "history",
                         "temporary internet files", "steam", "steamlibrary",
                         "epic games", "riot games", "ubisoft", "origin",
@@ -3480,7 +3480,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                 ex.submit(_scan_one_dir, d, start_pct + int((i / total_dirs) * (end_pct - start_pct))): (i, d)
                 for i, d in enumerate(dirs_to_scan)
             }
-            for future in as_completed(futures_map, timeout=180):  # 3 min max total
+            for future in as_completed(futures_map, timeout=120):  # 2 min max total
                 i, d = futures_map[future]
                 drive_label = d[:3] if len(d) >= 3 else d
                 done_count = sum(1 for f in futures_map if f.done())
@@ -3491,7 +3491,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                 if progress_callback:
                     progress_callback("Scan Fichiers Multi-Disques", pct, f"{drive_label}\\ terminé ({done_count}/{total_dirs})")
                 try:
-                    result = future.result(timeout=40)  # 40s max par dossier
+                    result = future.result(timeout=15)  # 15s max par dossier
                     suspects.extend(result)
                 except Exception:
                     pass  # Timeout ou erreur → on passe au suivant
