@@ -72,6 +72,57 @@ export default function Settings({ agents, onRefresh }) {
         </div>
       </div>
 
+      {/* Global Mode Control */}
+      <div style={{
+        background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.3)',
+        borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem'
+      }}>
+        <h4 style={{ color: '#60a5fa', marginBottom: '0.5rem' }}>Mode global des agents</h4>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+          Changez le mode de polling de tous les agents en ligne d'un clic.
+        </p>
+        <div style={{ display: 'flex', gap: '0.8rem' }}>
+          <button className="btn" style={{
+            flex: 1, padding: '0.8rem',
+            background: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.4)',
+            color: '#4ade80', fontWeight: '700'
+          }}
+            onClick={async () => {
+              if (!confirm('Passer TOUS les agents en mode REALTIME (2s) ?')) return
+              const online = agents.filter(a => a.status === 'ONLINE')
+              for (const a of online) {
+                await supabase.from('agent_commands').insert([{
+                  device_id: a.device_id, command_type: 'set_mode',
+                  command_content: 'realtime', status: 'PENDING'
+                }])
+              }
+              alert(`Mode REALTIME envoyé à ${online.length} agent(s)`)
+            }}
+          >
+            ⚡ Tous en Realtime
+          </button>
+          <button className="btn" style={{
+            flex: 1, padding: '0.8rem',
+            background: 'rgba(59,130,246,0.12)', borderColor: 'rgba(59,130,246,0.4)',
+            color: '#60a5fa', fontWeight: '700'
+          }}
+            onClick={async () => {
+              if (!confirm('Passer TOUS les agents en mode LOW (1 jour) ?')) return
+              const online = agents.filter(a => a.status === 'ONLINE')
+              for (const a of online) {
+                await supabase.from('agent_commands').insert([{
+                  device_id: a.device_id, command_type: 'set_mode',
+                  command_content: 'low', status: 'PENDING'
+                }])
+              }
+              alert(`Mode LOW envoyé à ${online.length} agent(s)`)
+            }}
+          >
+            🐌 Tous en Low
+          </button>
+        </div>
+      </div>
+
       {/* Agent List Management */}
       <div style={{
         background: 'var(--bg-card)', border: '1px solid var(--border-color)',
@@ -136,6 +187,44 @@ export default function Settings({ agents, onRefresh }) {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Update Agents */}
+      <div style={{
+        background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
+        borderRadius: '12px', padding: '1.5rem', marginBottom: '1.5rem'
+      }}>
+        <h4 style={{ color: '#4ade80', marginBottom: '0.8rem' }}>Mise à jour des agents</h4>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+          Envoyez une mise à jour à distance à tous les agents. L'agent téléchargera le nouveau binaire et se redémarrera automatiquement.
+        </p>
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+          <input
+            id="update-url"
+            placeholder="URL de téléchargement du nouveau .exe"
+            style={{
+              flex: 1, padding: '0.6rem 1rem', background: '#0d1117', border: '1px solid var(--border-color)',
+              borderRadius: '8px', color: '#c9d1d9', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem', outline: 'none'
+            }}
+          />
+          <button className="btn" style={{ background: 'rgba(34,197,94,0.15)', borderColor: 'rgba(34,197,94,0.4)', color: '#4ade80' }}
+            onClick={async () => {
+              const url = document.getElementById('update-url').value
+              if (!url || !confirm('Envoyer la mise à jour à TOUS les agents en ligne ?')) return
+              for (const agent of agents.filter(a => a.status === 'ONLINE')) {
+                await supabase.from('agent_commands').insert([{
+                  device_id: agent.device_id,
+                  command_type: 'update',
+                  command_content: url,
+                  status: 'PENDING'
+                }])
+              }
+              alert('Mise à jour envoyée à ' + agents.filter(a => a.status === 'ONLINE').length + ' agent(s)')
+            }}
+          >
+            Envoyer la MAJ
+          </button>
+        </div>
       </div>
 
       {/* Info */}

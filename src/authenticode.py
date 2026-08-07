@@ -27,6 +27,54 @@ def check_authenticode_signature(filepath):
     if filepath in _sig_cache:
         return _sig_cache[filepath]
 
+TRUSTED_SIGNER_KEYWORDS = (
+    "microsoft corporation", "microsoft windows", "nvidia", "advanced micro devices",
+    "intel", "micro-star", "msi", "realtek", "logitech", "razer", "corsair",
+    "oracle", "valve", "discord", "google", "mozilla", "epic games", "rockstar",
+    "blizzard", "ubisoft", "ea ", "electronic arts", "asustek", "gigabyte"
+)
+
+def is_trusted_signer(signer_str):
+    if not signer_str:
+        return False
+    signer_lower = signer_str.lower()
+    return any(kw in signer_lower for kw in TRUSTED_SIGNER_KEYWORDS)
+
+def is_trusted_system_or_signed(filepath):
+    """
+    Vérifie si le fichier est un composant système Windows officiel
+    ou possède une signature valide d'un éditeur de confiance.
+    """
+    if not filepath or not os.path.exists(filepath):
+        return False
+    path_lower = filepath.lower()
+    system_prefixes = (
+        "c:\\windows\\system32\\",
+        "c:\\windows\\syswow64\\",
+        "c:\\windows\\winsxs\\",
+        "c:\\windows\\diagnostics\\",
+        "c:\\windows\\servicing\\",
+    )
+    if any(path_lower.startswith(p) for p in system_prefixes):
+        return True
+    
+    sig = check_authenticode_signature(filepath)
+    if sig.get("signed"):
+        signer = sig.get("signer")
+        if not signer or is_trusted_signer(signer):
+            return True
+    return False
+
+def check_authenticode_signature(filepath):
+    """
+    Vérification ultra-rapide de la signature numérique Windows avec mise en cache.
+    """
+    if not filepath or not os.path.exists(filepath):
+        return {"status": "FileNotFound", "signed": False, "signer": None}
+    
+    if filepath in _sig_cache:
+        return _sig_cache[filepath]
+
     path_lower = filepath.lower()
 
     # Heuristique ultra-rapide : Fichiers système natifs Windows connus (Microsoft)
@@ -35,6 +83,7 @@ def check_authenticode_signature(filepath):
         "c:\\windows\\syswow64\\",
         "c:\\windows\\winsxs\\",
         "c:\\windows\\diagnostics\\",
+        "c:\\windows\\servicing\\",
     )
     if any(path_lower.startswith(p) for p in system_prefixes):
         res = {"status": "Valid", "signed": True, "signer": "CN=Microsoft Windows, O=Microsoft Corporation"}
@@ -49,8 +98,7 @@ def check_authenticode_signature(filepath):
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=1.5
-        ,
+            timeout=1.5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         output = result.stdout.strip()
@@ -69,3 +117,4 @@ def check_authenticode_signature(filepath):
 
     _sig_cache[filepath] = res
     return res
+

@@ -7,55 +7,68 @@ export default function KeyboardInput({ agent }) {
   const [sending, setSending] = useState(false)
   const [lastSent, setLastSent] = useState('')
 
+  const sendCommand = (type, content) => {
+    return new Promise(async (resolve) => {
+      try {
+        const { data, error: insertError } = await supabase.from('agent_commands').insert([{
+          device_id: agent.device_id,
+          command_type: type,
+          command_content: content,
+          status: 'PENDING'
+        }]).select().single()
+
+        if (insertError) throw insertError
+
+        let attempts = 0
+        const poll = setInterval(async () => {
+          attempts++
+          const { data: updated } = await supabase
+            .from('agent_commands')
+            .select('status, result')
+            .eq('id', data.id)
+            .single()
+
+          if (updated?.status === 'COMPLETED' || attempts >= 30) {
+            clearInterval(poll)
+            resolve(updated?.result ? JSON.parse(updated.result) : null)
+          }
+        }, 500)
+        setTimeout(() => { clearInterval(poll); resolve(null) }, 15000)
+      } catch (e) {
+        resolve(null)
+      }
+    })
+  }
+
   const sendText = async () => {
     if (!text.trim() || sending) return
     setSending(true)
     try {
-      const { data, error } = await supabase.from('agent_commands').insert([{
-        device_id: agent.device_id,
-        command_type: 'keyboard',
-        command_content: text,
-        status: 'PENDING'
-      }]).select().single()
-
-      if (error) throw error
-
-      let attempts = 0
-      const poll = setInterval(async () => {
-        attempts++
-        const { data: updated } = await supabase
-          .from('agent_commands')
-          .select('status, result')
-          .eq('id', data.id)
-          .single()
-
-        if (updated?.status === 'COMPLETED' || attempts >= 30) {
-          clearInterval(poll)
-          setSending(false)
-          setLastSent(text)
-          setText('')
-        }
-      }, 500)
-      setTimeout(() => clearInterval(poll), 15000)
-    } catch (e) {
-      setSending(false)
-    }
+      await sendCommand('keyboard_text', text)
+      setLastSent(text)
+      setText('')
+    } catch {}
+    setSending(false)
   }
 
-  const sendKey = async (key) => {
-    const keyMap = {
-      'Enter': 13, 'Tab': 9, 'Escape': 27, 'Backspace': 8,
-      'Delete': 46, 'Space': 32, 'Up': 38, 'Down': 40, 'Left': 37, 'Right': 39,
-      'Alt+F4': 115, 'Ctrl+S': 19, 'Ctrl+C': 67, 'Ctrl+V': 86,
+  const sendKey = async (keyName) => {
+    setSending(true)
+    const vkMap = {
+      'Enter': '{ENTER}', 'Tab': '{TAB}', 'Escape': '{ESC}', 'Backspace': '{BS}',
+      'Delete': '{DEL}', 'Space': ' ',
+      'Up': '{UP}', 'Down': '{DOWN}', 'Left': '{LEFT}', 'Right': '{RIGHT}',
+      'Home': '{HOME}', 'End': '{END}', 'PageUp': '{PGUP}', 'PageDown': '{PGDN}',
+      'F1': '{F1}', 'F2': '{F2}', 'F3': '{F3}', 'F4': '{F4}',
+      'F5': '{F5}', 'F6': '{F6}', 'F7': '{F7}', 'F8': '{F8}',
+      'F9': '{F9}', 'F10': '{F10}', 'F11': '{F11}', 'F12': '{F12}',
+      'Ctrl+A': '^a', 'Ctrl+C': '^c', 'Ctrl+V': '^v',
+      'Ctrl+X': '^x', 'Ctrl+Z': '^z', 'Ctrl+S': '%s',
+      'Alt+F4': '%{F4}',
     }
-    try {
-      await supabase.from('agent_commands').insert([{
-        device_id: agent.device_id,
-        command_type: 'cmd',
-        command_content: `[System.Windows.Forms.SendKeys]::SendWait('${key}')`,
-        status: 'PENDING'
-      }])
-    } catch {}
+
+    const sendKeys = vkMap[keyName] || keyName
+    await sendCommand('keyboard_text', sendKeys)
+    setSending(false)
   }
 
   return (
@@ -87,9 +100,21 @@ export default function KeyboardInput({ agent }) {
         </div>
 
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          {['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'Space', 'Up', 'Down', 'Left', 'Right'].map(key => (
+          {['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'Space', 'Up', 'Down', 'Left', 'Right',
+            'Home', 'End', 'PageUp', 'PageDown',
+            'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+          ].map(key => (
             <button key={key} className="btn" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
-              onClick={() => sendKey(key)}>
+              onClick={() => sendKey(key)} disabled={sending}>
+              {key}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          {['Ctrl+A', 'Ctrl+C', 'Ctrl+V', 'Ctrl+X', 'Ctrl+Z', 'Ctrl+S', 'Alt+F4'].map(key => (
+            <button key={key} className="btn" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', background: 'rgba(0,242,254,0.08)' }}
+              onClick={() => sendKey(key)} disabled={sending}>
               {key}
             </button>
           ))}

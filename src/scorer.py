@@ -119,6 +119,7 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
     total_observations = 0
     has_prefetch_trace = False
     
+    critical_reasons = []
     for app in apps_list:
         r = app.get("risk_assessment", {})
         score = r.get("risk_score", 0)
@@ -128,6 +129,13 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
             suspicious_apps += 1
         total_observations += len(r.get("observations", []))
         
+        for obs in r.get("observations", []):
+            sev = obs.get("severity")
+            if sev in ("CRITICAL", "HIGH", "CRITIQUE", "ÉLEVÉE"):
+                desc = obs.get("description") or obs.get("title") or ""
+                if desc and desc not in critical_reasons:
+                    critical_reasons.append(desc)
+
         # Vérifier si c'est une trace Prefetch
         if app.get("signature", {}).get("status") == "PrefetchTrace":
             has_prefetch_trace = True
@@ -136,6 +144,11 @@ def calculate_overall_risk_grouped(apps_list, system_info=None):
     confidence_level = "ÉLEVÉ (HIGH)"
     confidence_score = 95
     confidence_reasons = []
+
+    # 0. Alerte Majeure : Binaires ou Traces de Cheats/Spoofers Détectés
+    if critical_reasons:
+        for cr in critical_reasons[:5]:
+            confidence_reasons.append(f"DÉTECTION : {cr}")
 
     # 1. Formatage Récent
     if system_info and system_info.get("is_recent_reformat"):

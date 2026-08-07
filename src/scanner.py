@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Nombre de workers adaptatif selon les CPUs disponibles
 _CPU_CORES = os.cpu_count() or 4
 _CPU_WORKERS = min(max(_CPU_CORES * 2, 8), 32)
-from src.authenticode import get_file_sha256, check_authenticode_signature
+from src.authenticode import get_file_sha256, check_authenticode_signature, is_trusted_system_or_signed
 from src.scorer import evaluate_app_risk, calculate_overall_risk_grouped
 
 # ─────────────────────────────────────────────
@@ -1029,6 +1029,22 @@ def scan_amcache(progress_callback=None, pct=81):
                             winreg.CloseKey(subkey)
                             continue
 
+                        # Ignorer les binaires système et signés légitimes dans Amcache
+                        system_prefixes = (
+                            "c:\\windows\\system32\\",
+                            "c:\\windows\\syswow64\\",
+                            "c:\\windows\\winsxs\\",
+                            "c:\\windows\\diagnostics\\",
+                            "c:\\windows\\servicing\\",
+                        )
+                        if any(path_lower.startswith(p) for p in system_prefixes):
+                            winreg.CloseKey(subkey)
+                            continue
+
+                        if is_trusted_system_or_signed(file_path):
+                            winreg.CloseKey(subkey)
+                            continue
+
                         # Vérifier si c'est un cheat
                         match = _is_fivem_cheat_file(name, file_path)
                         if match:
@@ -1306,6 +1322,8 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
     try:
         if not os.path.isfile(file_path):
             return None
+        if is_trusted_system_or_signed(file_path):
+            return None
         fsize = os.path.getsize(file_path)
         if fsize < 512:
             return None
@@ -1333,8 +1351,9 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
         is_known_app = any(p in file_lower for p in [
             "fivem", "gta5", "rdr2", "chrome", "firefox", "edge", "discord",
             "steam", "epic games", "rockstar", "battle.net", "blizzard",
+            "ea sports", "ea games", "games", "steamlibrary", "ubisoft", "gog",
             "medal", "obs", "xampp", "visual studio", "vs code",
-            "program files", "windowsapps",
+            "program files", "windowsapps", "wise memory", "iobit", "driver booster",
             "nvidia", "amd", "intel", "realtek",
             "microsoft", "windows defender", "msmpeng",
             "epicinstaller", "epic online",
@@ -1389,6 +1408,8 @@ def _check_pe_packer_stub(file_path: str) -> dict | None:
     """
     try:
         if not os.path.isfile(file_path):
+            return None
+        if is_trusted_system_or_signed(file_path):
             return None
         fsize = os.path.getsize(file_path)
         if fsize < 4096:
@@ -1462,6 +1483,8 @@ def _check_pe_direct_syscall(file_path: str) -> dict | None:
     """
     try:
         if not os.path.isfile(file_path):
+            return None
+        if is_trusted_system_or_signed(file_path):
             return None
         fsize = os.path.getsize(file_path)
         if fsize < 4096:
@@ -1537,6 +1560,8 @@ def _check_pe_sections_anomaly(file_path: str) -> dict | None:
 
     try:
         if not os.path.isfile(file_path):
+            return None
+        if is_trusted_system_or_signed(file_path):
             return None
         fsize = os.path.getsize(file_path)
         if fsize < 1024:
@@ -1668,10 +1693,19 @@ def scan_uuid_config_files(progress_callback=None, pct=84):
                     dirs.clear()
                     continue
 
+                # Ignorer les dossiers serveur FiveM / txAdmin et projets dev connus
+                root_lower = root.lower()
+                if any(kw in root_lower for kw in ["\\server fivem\\", "\\txadmin\\", "\\fxserver\\", "\\node_modules\\", "\\.git\\"]):
+                    continue
+
                 # Y a-t-il un .exe dans ce dossier ?
                 has_exe = any(f.lower().endswith(".exe") for f in files)
 
                 for file in files:
+                    file_lower = file.lower()
+                    if file_lower in ["server-monitor-token.key", "txadmin.key", "package.json", "tsconfig.json"]:
+                        continue
+
                     fpath = os.path.join(root, file)
                     try:
                         fsize = os.path.getsize(fpath)
@@ -1740,7 +1774,7 @@ def scan_eventlog_new_services(progress_callback=None, pct=85):
         if isinstance(data, dict):
             data = [data]
 
-        # Services Windows légitimes connus (whitelist)
+        # Services Windows et Antivirus légitimes connus (whitelist)
         LEGIT_SERVICE_PREFIXES = (
             "windefend", "mpssvc", "bits", "wuauserv", "trustedinstaller",
             "spooler", "cryptsvc", "eventlog", "wsearch", "msiserver",
@@ -1751,6 +1785,9 @@ def scan_eventlog_new_services(progress_callback=None, pct=85):
             "nla", "dusm", "dot3svc", "wlidsvc", "tokenbroker",
             "camsvc", "cbdhsvc", "lfsvc", "mapsbroker", "perfhost",
             "wisvc", "wwansvc", "wbengine", "vds", "vss",
+            "malwarebytes", "mbamservice", "mcpr", "mcafee",
+            "eaanticheat", "ea anticheat", "eaanticheatservice",
+            "hwinfo", "driver booster", "iobit"
         )
 
         LEGIT_SERVICE_FILE_PATHS = (
@@ -1758,6 +1795,11 @@ def scan_eventlog_new_services(progress_callback=None, pct=85):
             "\\microsoft\\windows\\",
             "\\program files\\easyanticheat\\",
             "\\program files (x86)\\easyanticheat\\",
+            "\\programdata\\malwarebytes\\",
+            "\\program files\\malwarebytes\\",
+            "\\program files\\ea\\",
+            "\\program files (x86)\\iobit\\",
+            "hwinfo",
             "\\windows\\system32\\",
             "\\windows\\syswow64\\",
             "\\windows\\winsxs\\",
@@ -1827,6 +1869,8 @@ def scan_conhost_parent_suspicious(progress_callback=None, pct=86):
         "medalencoder.exe", "medal.exe", "obs64.exe", "obs32.exe",
         "devenv.exe", "msbuild.exe", "node.exe", "python.exe", "python3.exe",
         "npm.exe", "pip.exe", "code.exe", "git.exe", "bash.exe",
+        "antigravity ide.exe", "language_server_windows_x64.exe",
+        "pyrefly.exe", "ollama app.exe", "ollama.exe", "idea64.exe", "pycharm64.exe"
     }
 
     try:
@@ -2128,9 +2172,9 @@ def scan_spoofer_cleaner(progress_callback=None, pct=90):
     except Exception:
         pass
 
-    # ── 5. Nettoyage de traces anti-forensique (combinaison ≥3 clés absentes) ──
+    # ── 5. Nettoyage de traces anti-forensique (combinaison ≥4 clés absentes avec autre indice) ──
     missing_traces = [path for hive, path in CLEANER_TRACE_KEYS if not _reg_key_exists(hive, path)]
-    if len(missing_traces) >= 3:
+    if len(missing_traces) >= 4 and score > 0:
         score += 20
         findings.append({
             "rule": "trace_cleanup",
@@ -2351,6 +2395,8 @@ def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
     try:
         if not os.path.isfile(file_path) or os.path.getsize(file_path) < 1024:
             return None
+        if is_trusted_system_or_signed(file_path):
+            return None
 
         with open(file_path, "rb") as f:
             header = f.read(4096)
@@ -2470,13 +2516,17 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
     # 1. Usurpation de nom système (System Process Masquerading)
     # Ex: ntoskrnl.exe, svchost.exe dans Downloads, AppData, Documents, etc.
     if name_lower in SYSTEM_PROCESS_NAMES:
-        valid_sys_paths = (r"c:\windows\system32", r"c:\windows\syswow64", r"c:\windows\winsxs")
-        if full_path and not any(path_lower.startswith(vp) for vp in valid_sys_paths):
-            return {
-                "is_cheat": True,
-                "severity": "CRITICAL",
-                "reason": f"Usurpation de Fichier Système (Masquerading) : Fichier '{filename}' trouvé hors du dossier System32 !"
-            }
+        valid_sys_paths = (r"c:\windows\system32", r"c:\windows\syswow64", r"c:\windows\winsxs", r"c:\windows\servicing")
+        if full_path:
+            if not any(path_lower.startswith(vp) for vp in valid_sys_paths):
+                return {
+                    "is_cheat": True,
+                    "severity": "CRITICAL",
+                    "reason": f"Usurpation de Fichier Système (Masquerading) : Fichier '{filename}' trouvé hors du dossier System32 !"
+                }
+            else:
+                # Fichier système légitime dans son dossier officiel
+                return None
 
     # 2. Vérification par Hash SHA256/MD5 si le fichier existe sur disque
     if full_path and os.path.isfile(full_path):
@@ -2490,6 +2540,10 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
                 }
         except Exception:
             pass
+
+        # Ignorer les analyses heuristiques PE pour les fichiers signés légitimes / de confiance
+        if is_trusted_system_or_signed(full_path):
+            return None
 
         # 3. Contrôle PE avancé : imports dangereux (SetupDi, URLDownload, MiniDump, D3D_43...)
         pe_imports = _check_pe_imports_danger(full_path)
@@ -2516,16 +2570,20 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
         if pe_match:
             return pe_match
 
-    if ext not in CHEAT_EXTENSIONS:
-        return None
+    GENERIC_SHORT_KEYWORDS = {"aria", "dark", "nova", "rise", "vex", "cobra", "spoon", "mod", "hook", "menu", "esp", "luck"}
 
     for cheat in SPECIFIC_CHEATS:
-        if len(cheat) <= 3:
-            is_match = (name_lower == cheat) or (os.path.splitext(name_lower)[0] == cheat)
+        if len(cheat) <= 3 or cheat in GENERIC_SHORT_KEYWORDS:
+            base_name = os.path.splitext(name_lower)[0]
+            is_match = (name_lower == cheat) or (base_name == cheat) or (base_name.startswith(f"{cheat}_") or base_name.endswith(f"_{cheat}"))
         else:
             is_match = (cheat in name_lower)
             
         if is_match:
+            # Ignorer les fichiers de langue / .ini dans les dossiers de logiciels légitimes
+            path_lower = full_path.lower()
+            if ext == ".ini" and any(k in path_lower for k in ["languages", "lang", "translation", "program files", "wise memory", "driver booster"]):
+                continue
             return {
                 "is_cheat": True,
                 "severity": "CRITICAL" if cheat in ["ntoskrnl.exe", "realboss", "eulen", "redengine"] else "HIGH",
@@ -3763,17 +3821,66 @@ def run_system_scan(progress_callback=None):
     step("Processus & DLLs", 55, f"{len(raw_processes)} processus analysés | {total_dlls} DLLs")
     time.sleep(0.05)
 
-    # ── 58% : Boot Time
+    # ── 58% : Boot Time + Session Duration
     try:
         if psutil is not None:
             boot_ts = psutil.boot_time()
             boot_dt = datetime.fromtimestamp(boot_ts)
             boot_time_str = boot_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Durée depuis le démarrage (uptime machine)
+            uptime_sec = time.time() - boot_ts
+            up_h = int(uptime_sec // 3600)
+            up_m = int((uptime_sec % 3600) // 60)
+            up_s = int(uptime_sec % 60)
+            uptime_formatted = f"{up_h:02d}h {up_m:02d}min {up_s:02d}s"
         else:
             boot_time_str = "Inconnu"
+            uptime_formatted = "Inconnu"
     except Exception:
         boot_time_str = "Inconnu"
+        uptime_formatted = "Inconnu"
     system_info["boot_time"] = boot_time_str
+    system_info["uptime_formatted"] = uptime_formatted
+
+    # Heure de début de session Windows (logon utilisateur courant via WMI)
+    try:
+        ps_session_cmd = (
+            "try { $u = (Get-CimInstance Win32_LogonSession | Where-Object {$_.LogonType -in @(2,10,11)} | "
+            "Sort-Object StartTime | Select-Object -Last 1); "
+            "if ($u) { $u.StartTime.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss') } else { 'N/A' } } catch { 'N/A' }"
+        )
+        sess_res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_session_cmd],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        sess_str = sess_res.stdout.strip()
+        if sess_str and sess_str != "N/A" and "error" not in sess_str.lower():
+            sess_dt = datetime.strptime(sess_str, "%Y-%m-%d %H:%M:%S")
+            # Convertir en heure locale
+            import calendar
+            now_utc = datetime.utcnow()
+            now_local = datetime.now()
+            tz_offset_sec = (now_local - now_utc).total_seconds()
+            sess_local = sess_dt + __import__('datetime').timedelta(seconds=tz_offset_sec)
+            session_start_str = sess_local.strftime("%Y-%m-%d %H:%M:%S")
+            # Durée de la session
+            sess_sec = (datetime.now() - sess_local).total_seconds()
+            if sess_sec < 0:
+                sess_sec = 0
+            s_h = int(sess_sec // 3600)
+            s_m = int((sess_sec % 3600) // 60)
+            s_s = int(sess_sec % 60)
+            session_duration_str = f"{s_h:02d}h {s_m:02d}min {s_s:02d}s"
+        else:
+            session_start_str = "Inconnu"
+            session_duration_str = "Inconnu"
+    except Exception:
+        session_start_str = "Inconnu"
+        session_duration_str = "Inconnu"
+    system_info["session_start"] = session_start_str
+    system_info["session_duration"] = session_duration_str
 
     # ── 62-72% : Scan fichiers FiveM MULTI-DISQUES
     try:
@@ -4142,11 +4249,9 @@ def run_system_scan(progress_callback=None):
                 }
             })
 
-    # ── Risque Global & Confiance
-    risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
-
     # ── 100% : Terminé
     # Ajouter les traces Amcache comme entrées applications
+    _amcache_risk_map = {"CRITICAL": 70, "HIGH": 50, "MEDIUM": 35}
     for trace in amcache_traces:
         applications.append({
             "app_name"        : trace["executable_name"],
@@ -4158,7 +4263,7 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "TRACE_HISTORIQUE_AMCACHE",
             "risk_assessment" : {
-                "risk_score"  : 95,
+                "risk_score"  : _amcache_risk_map.get(trace.get("severity"), 35),
                 "observations": [{
                     "severity"   : trace["severity"],
                     "title"      : "Trace Amcache.hve (Historique Exécution Windows)",
@@ -4317,6 +4422,9 @@ def run_system_scan(progress_callback=None):
                     }]
                 }
             })
+
+    # ── Risque Global & Confiance (calculé sur TOUTES les applications)
+    risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
 
     system_info["hwid_crosscheck"] = hwid_crosscheck
 
