@@ -169,6 +169,351 @@ LEGITIMATE_FRAMEWORKS = [
 ]
 
 # ─────────────────────────────────────────────
+# IDENTIFICATION BINAIRE — VRAI NOM DES CHEATS
+# Strings uniques intégrés dans chaque cheat — même si le fichier est renommé
+# (ex: xxkfn.exe → "NitWit Loader v3.1")
+# Chaque liste contient des chaînes qui n'apparaissent QUE dans ce cheat.
+# Suffisamment courts pour être rapides, suffisamment spécifiques pour éviter les FP.
+# ─────────────────────────────────────────────
+CHEAT_BINARY_SIGNATURES = {
+    # ── NitWit / NitWitCleaner ──
+    "NitWit Loader": [
+        "nitwit", "NitWit", "NWLoader", "nw_loader", "nitwit_cleaner",
+        "nitwit.lua", "NWMenu", "nwmenu", "nitwit_key",
+        "nitwit_version", "NITWIT_", "NitWitMenu",
+    ],
+    # ── Eulen Executor ──
+    "Eulen Executor": [
+        "eulen", "EULEN", "EulenExecutor", "eulen.lua", "eulen_key",
+        "EulenMenu", "eulen_version", "eulenexec", "EULEN_LOADER",
+        "eulen_cheat", "EulenAC",
+    ],
+    # ── RedEngine ──
+    "RedEngine": [
+        "redengine", "RedEngine", "red_engine", "REDENGINE",
+        "RedEngineMenu", "redengine_key", "red_engine_loader",
+        "RedEngineLoader", "REDENGINE_BYPASS",
+    ],
+    # ── HX Menu / HX Hacks ──
+    "HX Hacks": [
+        "hxhacks", "HXHacks", "hx_menu", "HX_MENU", "hxmenu",
+        "hx_hacks", "HXMenu", "hx.asi", "HX_LOADER", "hxloader",
+        "HXExecutor",
+    ],
+    # ── Kiddion's Modest Menu ──
+    "Kiddion's Modest Menu": [
+        "kiddion", "Kiddion", "KIDDION", "modest_menu", "ModestMenu",
+        "kiddions", "Kiddion's", "modest-menu", "kiddion_menu",
+        "kiddion_key",
+    ],
+    # ── Stand Menu ──
+    "Stand Menu": [
+        "stand_menu", "StandMenu", "STAND_MENU", "stand.dll",
+        "stand_key", "StandLoader", "stand_loader", "STAND_CHEAT",
+        "stand_bypass",
+    ],
+    # ── Cherax ──
+    "Cherax": [
+        "cherax", "Cherax", "CHERAX", "cherax_menu", "CheraxMenu",
+        "cherax_key", "CheraxLoader", "cherax.dll",
+    ],
+    # ── 2Take1 Menu ──
+    "2Take1 Menu": [
+        "2take1", "2Take1", "2TAKE1", "twotake1", "TwoTake1",
+        "2t1_menu", "2take1_menu", "2T1Loader", "2take1_key",
+        "TwoTakeOne",
+    ],
+    # ── Impulse ──
+    "Impulse": [
+        "impulse_menu", "ImpulseMenu", "IMPULSE_MENU",
+        "impulse_key", "ImpulseLoader", "impulse.dll",
+        "ImpulseCheat", "IMPULSE_BYPASS",
+    ],
+    # ── Ozark ──
+    "Ozark": [
+        "ozark_menu", "OzarkMenu", "OZARK_MENU", "ozark_key",
+        "OzarkLoader", "ozark.dll", "OzarkCheat",
+    ],
+    # ── Luna Menu ──
+    "Luna Menu": [
+        "luna_menu", "LunaMenu", "LUNA_MENU", "luna_key",
+        "LunaLoader", "luna_cheat", "LunaExecutor",
+        "luna_bypass",
+    ],
+    # ── Dopamine Executor ──
+    "Dopamine Executor": [
+        "dopamine", "Dopamine", "DOPAMINE", "dopamine_menu",
+        "DopamineMenu", "dopamine_key", "DopamineLoader",
+        "dopamine.lua", "dopamine_exec",
+    ],
+    # ── HamMafia ──
+    "HamMafia": [
+        "hammafia", "HamMafia", "HAMMAFIA", "ham_mafia",
+        "HamMafiaLoader", "hammafia_key", "ham_menu",
+        "hammafiaexe",
+    ],
+    # ── TZ Menu / TZ Project ──
+    "TZ Menu": [
+        "tz_menu", "TZMenu", "TZ_MENU", "tz_project",
+        "TZProject", "tzx_menu", "TZXMenu", "tz_key",
+        "tzproject", "TZPROJECT",
+    ],
+    # ── Susano ──
+    "Susano": [
+        "susano", "Susano", "SUSANO", "susano_menu",
+        "SusanoMenu", "susano_key", "SusanoLoader",
+        "susano_cheat",
+    ],
+    # ── Lynx Menu ──
+    "Lynx Menu": [
+        "lynx_menu", "LynxMenu", "LYNX_MENU", "lynx_key",
+        "LynxLoader", "lynx.asi", "LynxCheat",
+        "lynxmenu",
+    ],
+    # ── Quasar Menu ──
+    "Quasar Menu": [
+        "quasar_menu", "QuasarMenu", "QUASAR_MENU", "quasar_key",
+        "QuasarLoader", "quasar_cheat", "QUASAR_BYPASS",
+    ],
+    # ── Sapphire Menu ──
+    "Sapphire Menu": [
+        "sapphire_menu", "SapphireMenu", "SAPPHIRE_MENU",
+        "sapphire_key", "SapphireLoader", "sapphire_cheat",
+    ],
+    # ── Absolute ──
+    "Absolute Cheat": [
+        "absolute_menu", "AbsoluteMenu", "ABSOLUTE_MENU",
+        "absolute_key", "AbsoluteLoader", "absolute_cheat",
+        "AbsoluteBypass",
+    ],
+    # ── Jaguar Menu ──
+    "Jaguar Menu": [
+        "jaguar_menu", "JaguarMenu", "JAGUAR_MENU",
+        "jaguar_key", "JaguarLoader", "jaguar_cheat",
+    ],
+    # ── Evolve Menu ──
+    "Evolve Menu": [
+        "evolve_menu", "EvolveMenu", "EVOLVE_MENU",
+        "evolve_key", "EvolveLoader", "evolve_cheat",
+    ],
+    # ── NixWare ──
+    "NixWare": [
+        "nixware", "NixWare", "NIXWARE", "nixware_menu",
+        "NixWareMenu", "nixware_key", "nixware_cheat",
+    ],
+    # ── GameSense ──
+    "GameSense": [
+        "gamesense", "GameSense", "GAMESENSE", "game_sense",
+        "GameSenseMenu", "gamesense_key", "gamesense_cheat",
+    ],
+    # ── Phantom X ──
+    "Phantom X": [
+        "phantom_x", "PhantomX", "PHANTOM_X", "phantom_menu",
+        "PhantomMenu", "phantom_key", "PhantomLoader",
+    ],
+    # ── Menyoo ──
+    "Menyoo": [
+        "menyoo", "Menyoo", "MENYOO", "menyoo_menu",
+        "MenyooMenu", "menyoo_key", "MenyooLoader",
+    ],
+    # ── ReaBoss / realboss ──
+    "ReaBoss Cheat": [
+        "realboss", "RealBoss", "REALBOSS", "real_boss",
+        "realboss_v4", "RealBossLoader", "realboss_key",
+        "REALBOSS_BYPASS",
+    ],
+    # ── Spoty (spoty.bat) ──
+    "Spoty Cleaner": [
+        "spoty.bat", "spoty_bat", "SPOTY", "spotyloader",
+        "SpotyBat", "spoty_cleaner",
+    ],
+    # ── HWID Spoofer générique ──
+    "HWID Spoofer": [
+        "hwid_spoof", "HWIDSpoof", "HWID_SPOOF", "hwid_spoofer",
+        "HWIDSpoofer", "spoof_hwid", "SpoofHWID",
+        "hwid_bypass", "ban_bypass", "BanBypass",
+    ],
+    # ── Loader / Injector générique ──
+    "Generic Cheat Loader": [
+        "cheat_loader", "CheatLoader", "CHEAT_LOADER",
+        "dll_injector", "DLLInjector", "manual_map",
+        "ManualMap", "reflective_loader", "ReflectiveLoader",
+        "process_hollowing", "ProcessHollowing",
+    ],
+    # ── Phaze Menu ──
+    "Phaze Menu": [
+        "phaze_menu", "PhazeMenu", "PHAZE_MENU",
+        "phaze_key", "PhazeLoader", "phaze_cheat",
+    ],
+    # ── Keyser ──
+    "Keyser": [
+        "keyser_menu", "KeyserMenu", "KEYSER",
+        "keyser_key", "KeyserLoader",
+    ],
+    # ── ProjectYX ──
+    "ProjectYX": [
+        "projectyx", "ProjectYX", "PROJECTYX",
+        "project_yx", "projectyx_key", "ProjectYXLoader",
+    ],
+    # ── Infinity Menu ──
+    "Infinity Menu": [
+        "infinity_menu", "InfinityMenu", "INFINITY_MENU",
+        "infinity_key", "InfinityLoader", "infinity_cheat",
+    ],
+    # ── Aria Menu ──
+    "Aria Menu": [
+        "aria_menu", "AriaMenu", "ARIA_MENU",
+        "aria_key", "AriaLoader", "aria_cheat",
+    ],
+    # ── Nova Menu ──
+    "Nova Menu": [
+        "nova_menu", "NovaMenu", "NOVA_MENU",
+        "nova_key", "NovaLoader", "nova_cheat",
+    ],
+    # ── Cobra Menu ──
+    "Cobra Menu": [
+        "cobra_menu", "CobraMenu", "COBRA_MENU",
+        "cobra_key", "CobraLoader", "cobra_cheat",
+    ],
+    # ── Vex Menu ──
+    "Vex Menu": [
+        "vex_menu", "VexMenu", "VEX_MENU",
+        "vex_key", "VexLoader", "vex_cheat",
+    ],
+    # ── Orbit Menu ──
+    "Orbit Menu": [
+        "orbit_menu", "OrbitMenu", "ORBIT_MENU",
+        "orbit_key", "OrbitLoader", "orbit_cheat",
+    ],
+}
+
+
+def _identify_cheat_by_binary_strings(file_path: str, max_read: int = 5 * 1024 * 1024) -> dict | None:
+    """
+    Extrait les chaînes ASCII et UTF-16LE embarquées dans un binaire PE
+    et les compare à CHEAT_BINARY_SIGNATURES pour identifier le vrai nom du cheat,
+    même si le fichier a été renommé (ex: xxkfn.exe → "NitWit Loader").
+
+    Performance : lit au maximum 5 MB (configurable), scan en ~10-50 ms.
+    Retourne un dict {'real_name': ..., 'matched_strings': [...], 'severity': ...}
+    ou None si aucune correspondance.
+    """
+    MIN_STR_LEN = 5  # Longueur minimum d'une chaîne à extraire
+
+    try:
+        if not os.path.isfile(file_path):
+            return None
+        fsize = os.path.getsize(file_path)
+        if fsize < 512:
+            return None
+
+        # ── ANTI-FP : Skip les binaires signés par un éditeur connu ──
+        # VirtualBox (Oracle), BlueStacks, Malwarebytes, Brave, etc.
+        # ne doivent JAMAIS être flaggés via fingerprinting
+        if is_trusted_system_or_signed(file_path):
+            return None
+
+        with open(file_path, "rb") as f:
+            raw = f.read(min(fsize, max_read))
+
+        if not raw.startswith(b'MZ'):
+            return None
+
+        # ── Extraction ASCII ──
+        ascii_strings = set()
+        current = []
+        for byte in raw:
+            if 32 <= byte < 127:
+                current.append(chr(byte))
+            else:
+                if len(current) >= MIN_STR_LEN:
+                    ascii_strings.add("".join(current))
+                current = []
+        if len(current) >= MIN_STR_LEN:
+            ascii_strings.add("".join(current))
+
+        # ── Extraction UTF-16LE (2 octets par caractère) ──
+        utf16_strings = set()
+        i = 0
+        current_u = []
+        while i + 1 < len(raw):
+            lo = raw[i]
+            hi = raw[i + 1]
+            if hi == 0 and 32 <= lo < 127:
+                current_u.append(chr(lo))
+                i += 2
+            else:
+                if len(current_u) >= MIN_STR_LEN:
+                    utf16_strings.add("".join(current_u))
+                current_u = []
+                i += 1
+        if len(current_u) >= MIN_STR_LEN:
+            utf16_strings.add("".join(current_u))
+
+        all_strings = ascii_strings | utf16_strings
+
+        # ── Version info PE (Resources) — souvent le champ ProductName ──
+        version_strings = set()
+        for marker in (b"ProductName\x00\x00", b"F\x00i\x00l\x00e\x00D\x00e\x00s\x00c\x00r\x00"):
+            idx = raw.find(marker)
+            if idx != -1:
+                chunk = raw[idx: idx + 256]
+                try:
+                    decoded = chunk.decode('utf-16-le', errors='replace').replace('\x00', ' ').strip()
+                    version_strings.add(decoded[:64])
+                except Exception:
+                    pass
+
+        all_strings |= version_strings
+
+        # ── Matching contre CHEAT_BINARY_SIGNATURES ──
+        best_match_name  = None
+        best_matched     = []
+        best_score       = 0
+
+        for cheat_name, patterns in CHEAT_BINARY_SIGNATURES.items():
+            matched = []
+            for pattern in patterns:
+                p_lower = pattern.lower()
+                for s in all_strings:
+                    s_lower = s.lower()
+                    # Pour les patterns courts (<8 chars), exiger une correspondance
+                    # en tant que mot entier (délimité par _/./ /début/fin)
+                    if len(p_lower) < 8:
+                        # Match exact ou délimité par des séparateurs
+                        if s_lower == p_lower or f"_{p_lower}" in s_lower or f"{p_lower}_" in s_lower or f".{p_lower}" in s_lower or f"{p_lower}." in s_lower:
+                            matched.append(pattern)
+                            break
+                    else:
+                        if p_lower in s_lower:
+                            matched.append(pattern)
+                            break
+
+            score = len(matched)
+            if score > best_score:
+                best_score       = score
+                best_match_name  = cheat_name
+                best_matched     = matched
+
+        # Seuil relevé à 3 patterns distincts pour confirmer (anti-FP renforcé)
+        # Avec 2 c'était trop facile de matcher par accident (VirtualBox, regedit, etc.)
+        if best_score >= 3 and best_match_name:
+            return {
+                "real_name"     : best_match_name,
+                "matched_strings": best_matched[:5],
+                "match_count"   : best_score,
+                "severity"      : "CRITICAL",
+            }
+
+    except (PermissionError, OSError):
+        pass
+    except Exception:
+        pass
+
+    return None
+
+
+# ─────────────────────────────────────────────
 # DÉTECTION DYNAMIQUE DES DISQUES MONTÉS
 # ─────────────────────────────────────────────
 def get_all_mounted_drives():
@@ -1358,13 +1703,17 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
             "microsoft", "windows defender", "msmpeng",
             "epicinstaller", "epic online",
             "brave", "bravebrowser",
-            "bluestacks", "onendrive",
+            "bluestacks", "onedrive",
             "riot games", "valorant", "vanguard",
             "translucenttb", "widgetboard",
+            "malwarebytes", "anti-malware", "mbam",
+            "ollama", "python", "node", "git",
+            "oracle", "virtualbox", "vmware",
+            "windows\\system32", "windows\\syswow64",
         ])
         context_penalty = 0
         if is_known_app and not is_in_temp:
-            context_penalty = -40
+            context_penalty = -60
 
         if has_setupdi and has_shdelete:
             total_score += 40
@@ -1385,7 +1734,7 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
 
         total_score = max(0, total_score + context_penalty)
 
-        if total_score >= 50 and hits:
+        if total_score >= 80 and hits:
             severity = "CRITICAL" if total_score >= 80 else "HIGH"
             return {
                 "is_cheat": True,
@@ -2506,7 +2855,13 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
     Retourne un dict {'is_cheat': True, 'reason': '...', 'severity': '...'} ou None.
     """
     name_lower = filename.lower().strip()
-    path_lower = full_path.lower().strip()
+    # ── Nettoyage préfixe NT device path (\??\, \\?\) ──
+    # ShimCache et certaines sources Windows retournent des chemins comme
+    # "\\?\C:\WINDOWS\system32\conhost.exe" au lieu de "C:\WINDOWS\..."
+    _clean_path = full_path.replace("\\??\\", "").replace("\\\\?\\", "")
+    if _clean_path.startswith("?\\"):
+        _clean_path = _clean_path[2:]
+    path_lower = _clean_path.lower().strip()
     ext = os.path.splitext(name_lower)[1]
 
     # Ignorer les frameworks légitimes
@@ -2516,8 +2871,8 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
     # 1. Usurpation de nom système (System Process Masquerading)
     # Ex: ntoskrnl.exe, svchost.exe dans Downloads, AppData, Documents, etc.
     if name_lower in SYSTEM_PROCESS_NAMES:
-        valid_sys_paths = (r"c:\windows\system32", r"c:\windows\syswow64", r"c:\windows\winsxs", r"c:\windows\servicing")
-        if full_path:
+        valid_sys_paths = ("c:\\windows\\system32", "c:\\windows\\syswow64", "c:\\windows\\winsxs", "c:\\windows\\servicing")
+        if path_lower:
             if not any(path_lower.startswith(vp) for vp in valid_sys_paths):
                 return {
                     "is_cheat": True,
@@ -2537,6 +2892,23 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
                     "is_cheat": True,
                     "severity": "CRITICAL",
                     "reason": f"Empreinte HASH de Cheat Détectée : Hash SHA256 '{h_sha256[:16]}...' correspond à {KNOWN_CHEAT_HASHES[h_sha256.lower()]} !"
+                }
+        except Exception:
+            pass
+
+        # 2.5. Identification de Cheat Renommé via Empreinte de Chaînes Binaires (Binary String Fingerprinting)
+        # Ex: xxkfn.exe -> Détecté comme "NitWit Loader" grâce aux chaînes internes
+        try:
+            binary_match = _identify_cheat_by_binary_strings(full_path)
+            if binary_match:
+                matched_str_fmt = ", ".join(f"'{s}'" for s in binary_match["matched_strings"])
+                return {
+                    "is_cheat": True,
+                    "severity": binary_match.get("severity", "CRITICAL"),
+                    "reason": (
+                        f"Cheat Renommé Identifié : '{filename}' est en réalité '{binary_match['real_name']}' ! "
+                        f"(Détecté via {binary_match['match_count']} empreintes textuelles binaires : {matched_str_fmt})"
+                    )
                 }
         except Exception:
             pass
@@ -3722,6 +4094,466 @@ def process_single(pinfo):
         return None
 
 
+# ─────────────────────────────────────────────
+# FORENSIQUE : SHIMCACHE (AppCompatCache)
+# Clé registre SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache
+# Stocke les exécutables qui ont contacté le compatibility layer Windows.
+# Complémentaire à Amcache/BAM : différent angle d'exécution, différent timestamp.
+# Utilisé par RedCore et krd.ac comme source majeure.
+# ─────────────────────────────────────────────
+def scan_shimcache(progress_callback=None, pct=91):
+    """
+    Parse AppCompatCache (ShimCache) depuis le registre Windows.
+    Retourne les exécutables suspects (cheats) ayant contacté la couche de
+    compatibilité Windows — trace fiable même après suppression du fichier.
+    Compatible Windows 10/11 (format binaire 10+).
+    """
+    if progress_callback:
+        progress_callback("ShimCache", pct, "Analyse AppCompatCache (ShimCache) registre...")
+
+    traces = []
+    try:
+        key_path = r"SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache"
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+        try:
+            raw_data, _ = winreg.QueryValueEx(key, "AppCompatCache")
+        except OSError:
+            winreg.CloseKey(key)
+            return traces
+        winreg.CloseKey(key)
+
+        if not raw_data or len(raw_data) < 16:
+            return traces
+
+        # Signature Windows 10/11 : 4 premiers octets = 0x30 0x00 0x00 0x00 (cache header magic)
+        # Ou signature "10ts" (0x74733031) sur certaines versions
+        sig = int.from_bytes(raw_data[:4], 'little')
+        offset = 0
+
+        if sig == 0x30:
+            # Windows 10 / Server 2016+ format : header 128 bytes
+            offset = 128
+        elif sig == 0x74733031:  # '10st' little-endian
+            offset = 128
+        elif sig == 0x80:
+            # Windows 8.1 / Server 2012 R2
+            offset = 128
+        else:
+            # Tentative générique : skip header de 128 bytes
+            offset = 128
+
+        entries_parsed = 0
+        max_entries = 1024  # Limite raisonnable pour éviter boucles infinies
+
+        while offset + 12 <= len(raw_data) and entries_parsed < max_entries:
+            try:
+                # Structure entrée Win10+:
+                # 4 bytes : signature "10ts" ou numéro de version
+                # 4 bytes : unknown/flags
+                # 8 bytes : last modified time (FILETIME)
+                # 2 bytes : path length (in bytes)
+                # 2 bytes : unknown
+                # N bytes : path (UTF-16LE)
+                entry_sig = int.from_bytes(raw_data[offset:offset + 4], 'little')
+
+                # Chercher le magic "10ts" (0x73743031 = little endian '10ts')
+                if entry_sig == 0x73743031 or raw_data[offset:offset + 4] == b"10ts":
+                    if offset + 12 > len(raw_data):
+                        break
+                    data_len = int.from_bytes(raw_data[offset + 8: offset + 12], 'little')
+                    if data_len <= 0 or offset + 12 + data_len > len(raw_data):
+                        offset += 4
+                        continue
+                    entry_data = raw_data[offset + 12: offset + 12 + data_len]
+
+                    # Path length et path (format Win10/11 10ts : 2 bytes path_len, puis UTF-16LE path)
+                    if len(entry_data) < 4:
+                        offset += 12 + data_len
+                        entries_parsed += 1
+                        continue
+                    path_len = int.from_bytes(entry_data[0:2], 'little')
+                    if path_len > 0 and 2 + path_len <= len(entry_data):
+                        try:
+                            exe_path = entry_data[2: 2 + path_len].decode('utf-16-le', errors='replace').strip('\x00')
+                            # Nettoyer le préfixe NT (\??\C:\...)
+                            if exe_path.startswith("\\??\\") or exe_path.startswith("\\??"):
+                                exe_path = exe_path.replace("\\??\\", "").replace("\\??", "")
+                        except Exception:
+                            exe_path = ""
+                        if exe_path:
+                            filename = os.path.basename(exe_path)
+                            match = _is_fivem_cheat_file(filename, exe_path)
+                            if match:
+                                traces.append({
+                                    "executable_name": filename,
+                                    "exe_path": exe_path,
+                                    "severity": match.get("severity", "HIGH"),
+                                    "description": (
+                                        f"Trace ShimCache (AppCompatCache) pour '{filename}' : {match['reason']} "
+                                        f"— Chemin enregistré dans la couche de compatibilité Windows."
+                                    )
+                                })
+                    offset += 12 + data_len
+                    entries_parsed += 1
+                else:
+                    # Scan en avant pour trouver le prochain "10ts"
+                    next_sig = raw_data.find(b'\x31\x30\x74\x73', offset + 1)  # '10ts' bytes
+                    if next_sig == -1 or next_sig == offset:
+                        break
+                    offset = next_sig
+            except Exception:
+                offset += 4
+                entries_parsed += 1
+                continue
+
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("ShimCache", pct + 1,
+                          f"{len(traces)} trace(s) ShimCache suspecte(s) détectée(s)")
+    return traces
+
+
+# ─────────────────────────────────────────────
+# FORENSIQUE : PARSING $MFT (Master File Table NTFS)
+# Détecte les fichiers supprimés que l'USN Journal ne capture plus
+# (journal trop petit, purgé, ou entrée USN écrasée).
+# Complémentaire à USN Journal — couvre les suppressions plus anciennes.
+# ─────────────────────────────────────────────
+def scan_mft_deleted_files(drives, progress_callback=None, pct=92):
+    """
+    Parse partiellement le $MFT NTFS pour trouver des fichiers marqués
+    comme supprimés (flag FILE_RECORD_IN_USE absent) dont le nom correspond
+    à une signature de cheat connue.
+    Nécessite des droits admin (lecture directe du volume \\\\.\\ ).
+    Limite : lit les 20 premiers MB du $MFT pour rester rapide.
+    """
+    if progress_callback:
+        progress_callback("MFT Parser", pct, "Analyse $MFT NTFS (fichiers supprimés profonds)...")
+
+    traces = []
+    MAX_MFT_READ = 20 * 1024 * 1024  # 20 MB max
+    MFT_RECORD_SIZE = 1024
+    MFT_MAGIC = b'FILE'
+    FLAG_IN_USE = 0x0001
+
+    for drive in drives:
+        letter = drive.get("letter", "")
+        if not letter or drive.get("fstype", "").upper() not in ("NTFS", ""):
+            continue
+        drive_letter = letter.rstrip("\\").rstrip(":")
+        volume_path = f"\\\\.\\{drive_letter}:"
+        try:
+            with open(volume_path, "rb") as vol:
+                # Lire le Boot Record pour trouver l'offset du $MFT
+                boot = vol.read(512)
+                if len(boot) < 512:
+                    continue
+
+                # BPB offsets
+                bytes_per_sector     = int.from_bytes(boot[0x0B:0x0D], 'little')
+                sectors_per_cluster  = boot[0x0D]
+                mft_cluster          = int.from_bytes(boot[0x30:0x38], 'little')
+
+                if bytes_per_sector == 0 or sectors_per_cluster == 0:
+                    continue
+
+                bytes_per_cluster = bytes_per_sector * sectors_per_cluster
+                mft_offset        = mft_cluster * bytes_per_cluster
+
+                vol.seek(mft_offset)
+                mft_data = vol.read(MAX_MFT_READ)
+
+        except (PermissionError, OSError):
+            # Pas de droits admin ou volume non-NTFS
+            continue
+        except Exception:
+            continue
+
+        # Parser les records FILE
+        num_records = len(mft_data) // MFT_RECORD_SIZE
+        for i in range(num_records):
+            rec_start = i * MFT_RECORD_SIZE
+            rec = mft_data[rec_start: rec_start + MFT_RECORD_SIZE]
+
+            if len(rec) < MFT_RECORD_SIZE:
+                break
+            if rec[:4] != MFT_MAGIC:
+                continue
+
+            # Flags : offset 22, 2 bytes
+            flags = int.from_bytes(rec[22:24], 'little')
+            is_deleted = not (flags & FLAG_IN_USE)
+            if not is_deleted:
+                continue
+
+            # Parser l'attribut $FILE_NAME (type 0x30) pour le nom
+            # First attribute offset : bytes 20-21
+            first_attr_off = int.from_bytes(rec[20:22], 'little')
+            if first_attr_off >= MFT_RECORD_SIZE:
+                continue
+
+            attr_off = first_attr_off
+            filename_found = ""
+            try:
+                while attr_off + 8 <= MFT_RECORD_SIZE:
+                    attr_type = int.from_bytes(rec[attr_off: attr_off + 4], 'little')
+                    attr_len  = int.from_bytes(rec[attr_off + 4: attr_off + 8], 'little')
+
+                    if attr_type == 0xFFFFFFFF:  # End marker
+                        break
+                    if attr_len < 8 or attr_off + attr_len > MFT_RECORD_SIZE:
+                        break
+
+                    if attr_type == 0x30:  # $FILE_NAME
+                        # Non-resident flag : offset +8
+                        non_resident = rec[attr_off + 8]
+                        if non_resident == 0:  # resident
+                            content_off = int.from_bytes(rec[attr_off + 20: attr_off + 22], 'little')
+                            data_start  = attr_off + content_off
+                            if data_start + 66 <= MFT_RECORD_SIZE:
+                                name_len = rec[data_start + 64]  # name length in chars
+                                name_off = data_start + 66
+                                if name_len > 0 and name_off + name_len * 2 <= MFT_RECORD_SIZE:
+                                    try:
+                                        filename_found = rec[name_off: name_off + name_len * 2].decode('utf-16-le', errors='replace')
+                                    except Exception:
+                                        pass
+                                if filename_found:
+                                    break
+
+                    attr_off += attr_len
+            except Exception:
+                continue
+
+            if not filename_found:
+                continue
+
+            # Vérifier si c'est un cheat connu
+            match = _is_fivem_cheat_file(filename_found, f"{letter}\\[MFT_DELETED]\\{filename_found}")
+            if match:
+                traces.append({
+                    "filename": filename_found,
+                    "path": f"{letter}\\[MFT_SUPPRIMÉ]\\{filename_found}",
+                    "drive": letter,
+                    "severity": match.get("severity", "HIGH"),
+                    "reason": (
+                        f"Fichier SUPPRIMÉ trouvé dans le $MFT NTFS : '{filename_found}' sur {letter} — "
+                        f"{match['reason']} — La suppression n'efface pas l'entrée MFT immédiatement."
+                    )
+                })
+
+    if progress_callback:
+        progress_callback("MFT Parser", pct + 1,
+                          f"{len(traces)} fichier(s) supprimé(s) suspect(s) trouvé(s) dans $MFT")
+    return traces
+
+
+# ─────────────────────────────────────────────
+# FORENSIQUE : ENTROPIE SHANNON / DÉTECTION PACKING
+# Calcule l'entropie de Shannon sur les sections PE des fichiers suspects.
+# Un exécutable légitime non compressé → entropie ~5.0-6.5 bits.
+# Un fichier packé/chiffré (UPX, MPRESS, custom packer) → entropie > 7.2 bits.
+# Complète _check_pe_packer_stub en couvrant les packers inconnus.
+# ─────────────────────────────────────────────
+def _compute_shannon_entropy(data: bytes) -> float:
+    """Calcule l'entropie de Shannon en bits par octet sur un bloc de données."""
+    if not data:
+        return 0.0
+    from math import log2
+    freq = [0] * 256
+    for b in data:
+        freq[b] += 1
+    length = len(data)
+    entropy = 0.0
+    for f in freq:
+        if f > 0:
+            p = f / length
+            entropy -= p * log2(p)
+    return entropy
+
+
+def scan_pe_entropy(drives, progress_callback=None, pct=93):
+    """
+    Scanne les fichiers EXE/DLL suspects (non signés, hors dossiers système)
+    et calcule leur entropie de Shannon par section PE.
+    Un fichier avec entropie > 7.2 bits est probablement packé/chiffré (signe de cheat).
+    Cible en priorité : %TEMP%, %APPDATA%, Downloads, Bureau, FiveM plugins.
+    """
+    if progress_callback:
+        progress_callback("Entropie PE", pct, "Analyse entropie Shannon des exécutables suspects...")
+
+    HIGH_ENTROPY_THRESHOLD = 7.2   # > 7.2 = probablement packé
+    CRITICAL_ENTROPY       = 7.6   # > 7.6 = chiffré/custom packer (très suspect)
+    MAX_FILES_PER_DIR      = 50    # Limite par dossier pour rester rapide
+    MAX_FILE_SIZE          = 30 * 1024 * 1024  # 30 MB max
+    MIN_FILE_SIZE          = 4096  # Ignorer les micro-fichiers
+
+    # Dossiers à cibler en priorité
+    target_dirs = []
+    local_app  = os.environ.get("LOCALAPPDATA", "")
+    app_data   = os.environ.get("APPDATA", "")
+    temp_dir   = os.environ.get("TEMP", "")
+    user_prof  = os.environ.get("USERPROFILE", "")
+
+    for base, subpath in [
+        (temp_dir, ""),
+        (local_app, "Temp"),
+        (local_app, "FiveM\\FiveM.app\\plugins"),
+        (local_app, "FiveM\\FiveM.app\\data\\cache"),
+        (app_data, ""),
+        (user_prof, "Downloads"),
+        (user_prof, "Desktop"),
+        (user_prof, "Bureau"),
+    ]:
+        if base:
+            full = os.path.join(base, subpath) if subpath else base
+            if os.path.isdir(full):
+                target_dirs.append(full)
+
+    # Aussi les racines des disques (scan superficiel, 1 niveau seulement)
+    for drive in drives:
+        letter = drive.get("letter", "")
+        if letter:
+            clean_letter = letter.rstrip("\\") + "\\"
+            target_dirs.append(clean_letter)
+
+    traces = []
+    scanned = 0
+
+    for scan_dir in target_dirs:
+        try:
+            # Pour les racines de disques, scan 1 niveau seulement
+            is_drive_root = len(scan_dir.rstrip("\\")) <= 3
+            entries = []
+            if is_drive_root:
+                try:
+                    for fname in os.listdir(scan_dir):
+                        fpath = os.path.join(scan_dir, fname)
+                        if os.path.isfile(fpath):
+                            entries.append(fpath)
+                except OSError:
+                    pass
+            else:
+                for root, dirs, files in os.walk(scan_dir):
+                    # Ignorer les dossiers système/légitimes
+                    dirs[:] = [
+                        d for d in dirs
+                        if d.lower() not in ("windows", "system32", "syswow64",
+                                             "program files", "program files (x86)",
+                                             "programdata", "winsxs")
+                    ]
+                    for fname in files:
+                        entries.append(os.path.join(root, fname))
+                    if len(entries) >= MAX_FILES_PER_DIR:
+                        break
+
+            count = 0
+            for fpath in entries:
+                if count >= MAX_FILES_PER_DIR:
+                    break
+                ext = os.path.splitext(fpath)[1].lower()
+                if ext not in (".exe", ".dll", ".sys", ".asi"):
+                    continue
+                try:
+                    fname_only = os.path.basename(fpath)
+                    path_lower = fpath.lower()
+                    fname_lower = fname_only.lower()
+
+                    # Ignorer notre propre outil et frameworks légitimes
+                    if any(legit in fname_lower or legit in path_lower for legit in LEGITIMATE_FRAMEWORKS):
+                        continue
+
+                    fsize = os.path.getsize(fpath)
+                    if fsize < MIN_FILE_SIZE or fsize > MAX_FILE_SIZE:
+                        continue
+                    # Ignorer si signé légitimement
+                    if is_trusted_system_or_signed(fpath):
+                        continue
+
+                    with open(fpath, "rb") as f:
+                        raw = f.read(min(fsize, MAX_FILE_SIZE))
+
+                    if not raw.startswith(b'MZ'):
+                        continue
+
+                    # Parser les sections PE pour calculer l'entropie par section
+                    pe_off = int.from_bytes(raw[0x3C:0x40], 'little')
+                    if pe_off + 24 > len(raw):
+                        continue
+                    num_sec  = int.from_bytes(raw[pe_off + 6:  pe_off + 8],  'little')
+                    opt_size = int.from_bytes(raw[pe_off + 20: pe_off + 22], 'little')
+                    sec_off  = pe_off + 24 + opt_size
+
+                    high_entropy_sections = []
+                    for i in range(min(num_sec, 16)):
+                        s = sec_off + i * 40
+                        if s + 40 > len(raw):
+                            break
+                        raw_name   = raw[s: s + 8].rstrip(b'\x00')
+                        sec_name   = raw_name.decode('ascii', errors='replace').strip()
+                        raw_off    = int.from_bytes(raw[s + 20: s + 24], 'little')
+                        raw_size   = int.from_bytes(raw[s + 16: s + 20], 'little')
+
+                        if raw_size < 512 or raw_off + raw_size > len(raw):
+                            continue
+
+                        sec_data  = raw[raw_off: raw_off + raw_size]
+                        entropy   = _compute_shannon_entropy(sec_data)
+
+                        if entropy >= HIGH_ENTROPY_THRESHOLD:
+                            high_entropy_sections.append((sec_name or f"sec_{i}", round(entropy, 3)))
+
+                    if not high_entropy_sections:
+                        continue
+
+                    # Ignorer si la SEULE section à haute entropie est .rsrc ou .reloc (ressources/icônes compressées normales)
+                    sec_names = [n.lower() for n, _ in high_entropy_sections]
+                    if all(n in (".rsrc", ".reloc", "rsrc", "reloc") for n in sec_names):
+                        continue
+
+                    max_entropy = max(e for _, e in high_entropy_sections)
+                    severity = "CRITICAL" if max_entropy >= CRITICAL_ENTROPY else "HIGH"
+
+                    # Augmenter la sévérité si le nom est aussi suspect
+                    name_match = _is_fivem_cheat_file(fname_only, fpath)
+                    if name_match:
+                        severity = "CRITICAL"
+                        name_reason = f" | {name_match['reason']}"
+                    else:
+                        name_reason = ""
+
+                    sections_str = ", ".join(
+                        f"{n}={e}" for n, e in high_entropy_sections[:4]
+                    )
+                    traces.append({
+                        "filename": fname_only,
+                        "path": fpath,
+                        "severity": severity,
+                        "max_entropy": max_entropy,
+                        "high_entropy_sections": high_entropy_sections,
+                        "reason": (
+                            f"Entropie élevée détectée dans '{fname_only}' (max={max_entropy} bits, "
+                            f"seuil={HIGH_ENTROPY_THRESHOLD}) — Sections: {sections_str}. "
+                            f"Fichier probablement packé/chiffré (packer custom, cheat obfusqué){name_reason}."
+                        )
+                    })
+                    scanned += 1
+                    count += 1
+                except (PermissionError, OSError):
+                    continue
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    if progress_callback:
+        progress_callback("Entropie PE", pct + 1,
+                          f"{len(traces)} fichier(s) à haute entropie détecté(s) sur {scanned} scannés")
+    return traces
+
+
 def run_system_scan(progress_callback=None):
 
     def step(stage, pct, info=""):
@@ -3918,6 +4750,10 @@ def run_system_scan(progress_callback=None):
         f_lua = forensique_ex.submit(scan_fivem_lua_js_cheat_scripts, progress_callback, 88)
         f_hol = forensique_ex.submit(scan_process_hollowing, progress_callback, 89)
         f_cleaner = forensique_ex.submit(scan_spoofer_cleaner, progress_callback, 90)
+        # ── Sprint 3 : ShimCache, MFT Parser, Entropie PE
+        f_shim    = forensique_ex.submit(scan_shimcache, progress_callback, 91)
+        f_mft     = forensique_ex.submit(scan_mft_deleted_files, mounted_drives, progress_callback, 92)
+        f_entropy = forensique_ex.submit(scan_pe_entropy, mounted_drives, progress_callback, 93)
 
         try:
             prefetch_res = f_pf.result(timeout=_FORENSIC_TIMEOUT)
@@ -4003,6 +4839,21 @@ def run_system_scan(progress_callback=None):
             cleaner_result = f_cleaner.result(timeout=_FORENSIC_TIMEOUT)
         except Exception:
             cleaner_result = {"score": 0, "findings": []}
+
+        try:
+            shimcache_traces = f_shim.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            shimcache_traces = []
+
+        try:
+            mft_traces = f_mft.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            mft_traces = []
+
+        try:
+            entropy_traces = f_entropy.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            entropy_traces = []
     finally:
         forensique_ex.shutdown(wait=False, cancel_futures=True)
 
@@ -4117,8 +4968,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "ARTEFACT_DISQUE",
                 "risk_assessment" : {
-                    "risk_score"  : 85,
-                    "observations": [{
+                    "risk_score"   : 85,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : suspect.get("severity", "CRITICAL"),
                         "title"      : "Fichier Suspect Détecté sur le Disque",
                         "description": suspect["reason"]
@@ -4139,8 +4992,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "TRACE_HISTORIQUE_PREFETCH",
                 "risk_assessment" : {
-                    "risk_score"  : 90,
-                    "observations": [{
+                    "risk_score"   : 90,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : "CRITICAL",
                         "title"      : "Trace Historique d'Exécution Windows (Prefetch)",
                         "description": trace["description"]
@@ -4174,8 +5029,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "TRACE_HISTORIQUE_DEFENDER",
                 "risk_assessment" : {
-                    "risk_score"  : 95,
-                    "observations": [{
+                    "risk_score"   : 95,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : "CRITICAL",
                         "title"      : f"Détection Defender ({raw_threat})",
                         "description": trace["description"]
@@ -4196,8 +5053,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "TRACE_HISTORIQUE_USN",
                 "risk_assessment" : {
-                    "risk_score"  : 95,
-                    "observations": [{
+                    "risk_score"   : 95,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : "CRITICAL",
                         "title"      : "Fichier Supprimé Détecté dans le Journal NTFS (USN)",
                         "description": trace["reason"]
@@ -4218,8 +5077,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "TRACE_HISTORIQUE_BAM",
                 "risk_assessment" : {
-                    "risk_score"  : 95,
-                    "observations": [{
+                    "risk_score"   : 95,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : trace["severity"],
                         "title"      : "Trace d'Exécution Registre (BAM)",
                         "description": trace["description"]
@@ -4240,8 +5101,10 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "TRACE_HISTORIQUE_USERASSIST",
                 "risk_assessment" : {
-                    "risk_score"  : 90,
-                    "observations": [{
+                    "risk_score"   : 90,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : trace["severity"],
                         "title"      : "Trace d'Exécution Explorer (UserAssist)",
                         "description": trace["description"]
@@ -4263,8 +5126,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "TRACE_HISTORIQUE_AMCACHE",
             "risk_assessment" : {
-                "risk_score"  : _amcache_risk_map.get(trace.get("severity"), 35),
-                "observations": [{
+                "risk_score"   : _amcache_risk_map.get(trace.get("severity"), 35),
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK" if trace.get("severity") in ("CRITICAL", "HIGH") else "MEDIUM_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "Trace Amcache.hve (Historique Exécution Windows)",
                     "description": trace["description"]
@@ -4284,8 +5149,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "CONNEXION_RÉSEAU_SUSPECTE",
             "risk_assessment" : {
-                "risk_score"  : 80,
-                "observations": [{
+                "risk_score"   : 80,
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "Connexion Réseau Suspecte active (Port Cheat)",
                     "description": trace["description"]
@@ -4305,8 +5172,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "DLL_INJECTÉE_SUSPECTE",
             "risk_assessment" : {
-                "risk_score"  : 95,
-                "observations": [{
+                "risk_score"   : 95,
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "DLL suspecte non signée détectée dans un processus de jeu",
                     "description": trace["description"]
@@ -4326,8 +5195,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "FICHIER_LICENCE_UUID_CHEAT",
             "risk_assessment" : {
-                "risk_score"  : 85,
-                "observations": [{
+                "risk_score"   : 85,
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "Fichier de Licence UUID Cheat Détecté",
                     "description": trace["description"]
@@ -4347,8 +5218,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "SERVICE_SUSPECT_EVENTID_7045",
             "risk_assessment" : {
-                "risk_score"  : 95,
-                "observations": [{
+                "risk_score"   : 95,
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "Service Suspect Créé (EventID 7045) — Possible Driver Cheat",
                     "description": trace["description"]
@@ -4368,8 +5241,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "CONHOST_PARENT_SUSPECT",
             "risk_assessment" : {
-                "risk_score"  : 60,
-                "observations": [{
+                "risk_score"   : 60,
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : "conhost.exe avec Parent Non-Légitime (Loader Cheat CONSOLE)",
                     "description": trace["description"]
@@ -4378,8 +5253,6 @@ def run_system_scan(progress_callback=None):
         })
 
     # ── Traces cleaner/spoofer FiveM (NitWitcleaner & similaires) ──
-    # Scores volontairement calibrés : seule une signature forte (hosts, licence,
-    # batch temp) approche le seuil CHEATER ; le signal faible (traces) reste info.
     _cleaner_risk_map = {"CRITICAL": 80, "HIGH": 65, "MEDIUM": 45}
     for trace in cleaner_result.get("findings", []):
         applications.append({
@@ -4392,8 +5265,10 @@ def run_system_scan(progress_callback=None):
             "total_dll_count" : 0,
             "status_type"     : "CLEANER_SPOOFER_EFFECT",
             "risk_assessment" : {
-                "risk_score"  : _cleaner_risk_map.get(trace["severity"], 50),
-                "observations": [{
+                "risk_score"   : _cleaner_risk_map.get(trace["severity"], 50),
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK" if trace["severity"] in ("CRITICAL", "HIGH") else "MEDIUM_RISK",
+                "observations" : [{
                     "severity"   : trace["severity"],
                     "title"      : trace["title"],
                     "description": trace["detail"]
@@ -4414,14 +5289,88 @@ def run_system_scan(progress_callback=None):
                 "total_dll_count" : 0,
                 "status_type"     : "HWID_SPOOF_ACTIF",
                 "risk_assessment" : {
-                    "risk_score"  : 95,
-                    "observations": [{
+                    "risk_score"   : 95,
+                    "is_suspicious": True,
+                    "verdict_level": "HIGH_RISK",
+                    "observations" : [{
                         "severity"   : "CRITICAL",
                         "title"      : "HWID Spoofing Actif Détecté (Cross-Check Registre vs WMI)",
                         "description": detail
                     }]
                 }
             })
+
+    # ── Ajouter les traces ShimCache (AppCompatCache)
+    _shim_risk = {"CRITICAL": 85, "HIGH": 65, "MEDIUM": 45}
+    for trace in shimcache_traces:
+        applications.append({
+            "app_name"        : trace["executable_name"],
+            "exe_path"        : trace["exe_path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "ShimCacheTrace"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "TRACE_HISTORIQUE_SHIMCACHE",
+            "risk_assessment" : {
+                "risk_score"   : _shim_risk.get(trace.get("severity"), 65),
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK" if trace.get("severity") in ("CRITICAL", "HIGH") else "MEDIUM_RISK",
+                "observations" : [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Trace ShimCache (AppCompatCache) — Couche Compatibilité Windows",
+                    "description": trace["description"]
+                }]
+            }
+        })
+
+    # ── Ajouter les traces MFT (fichiers supprimés $MFT)
+    _mft_risk = {"CRITICAL": 90, "HIGH": 70, "MEDIUM": 50}
+    for trace in mft_traces:
+        applications.append({
+            "app_name"        : trace["filename"],
+            "exe_path"        : trace["path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "MFTDeletedTrace"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "TRACE_MFT_SUPPRIME",
+            "risk_assessment" : {
+                "risk_score"   : _mft_risk.get(trace.get("severity"), 70),
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
+                    "severity"   : trace["severity"],
+                    "title"      : "Fichier Supprimé Détecté dans $MFT NTFS (Suppression profonde)",
+                    "description": trace["reason"]
+                }]
+            }
+        })
+
+    # ── Ajouter les traces d'entropie élevée (PE packés/chiffrés)
+    _entropy_risk = {"CRITICAL": 80, "HIGH": 60}
+    for trace in entropy_traces:
+        applications.append({
+            "app_name"        : trace["filename"],
+            "exe_path"        : trace["path"],
+            "sha256"          : None,
+            "signature"       : {"signed": False, "status": "HighEntropyPE"},
+            "instances_count" : 0,
+            "pids"            : [],
+            "total_dll_count" : 0,
+            "status_type"     : "PE_HAUTE_ENTROPIE_PACK",
+            "risk_assessment" : {
+                "risk_score"   : _entropy_risk.get(trace.get("severity"), 60),
+                "is_suspicious": True,
+                "verdict_level": "HIGH_RISK",
+                "observations" : [{
+                    "severity"   : trace["severity"],
+                    "title"      : f"PE Packé/Chiffré Détecté (Entropie Shannon={trace.get('max_entropy', '?')} bits)",
+                    "description": trace["reason"]
+                }]
+            }
+        })
 
     # ── Risque Global & Confiance (calculé sur TOUTES les applications)
     risk_summary = calculate_overall_risk_grouped(applications, system_info=system_info)
@@ -4432,7 +5381,8 @@ def run_system_scan(progress_callback=None):
         f"{len(applications)} apps ({total_procs} PIDs) | {len(mounted_drives)} disque(s) | "
         f"{len(usb_history)} USB | {len(prefetch_traces)} Prefetch | {len(amcache_traces)} Amcache | "
         f"{len(injected_dll_traces)} DLL Inj | {len(uuid_traces)} UUID | {len(eventlog_svc_traces)} Svc7045 | "
-        f"{len(cleaner_result.get('findings', []))} Cleaner"
+        f"{len(cleaner_result.get('findings', []))} Cleaner | "
+        f"{len(shimcache_traces)} ShimCache | {len(mft_traces)} MFT | {len(entropy_traces)} Entropy"
     ))
 
     return {
@@ -4460,7 +5410,10 @@ def run_system_scan(progress_callback=None):
             "conhost_traces_count"    : len(conhost_traces),
             "cleaner_effects_count"   : len(cleaner_result.get("findings", [])),
             "hwid_spoof_detected"     : hwid_crosscheck.get("spoof_detected", False),
-            "drives_scanned"          : len(mounted_drives)
+            "drives_scanned"          : len(mounted_drives),
+            "shimcache_traces_count"  : len(shimcache_traces),
+            "mft_traces_count"        : len(mft_traces),
+            "entropy_traces_count"    : len(entropy_traces)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
@@ -4477,6 +5430,9 @@ def run_system_scan(progress_callback=None):
         "conhost_traces"      : conhost_traces,
         "hwid_crosscheck"     : hwid_crosscheck,
         "cleaner_effects"     : cleaner_result.get("findings", []),
+        "shimcache_traces"     : shimcache_traces,
+        "mft_traces"          : mft_traces,
+        "entropy_traces"      : entropy_traces,
         "vm_sandbox"          : vm_sandbox_result,
         "risk_summary"        : risk_summary,
         "applications"     : applications

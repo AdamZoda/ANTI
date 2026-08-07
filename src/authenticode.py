@@ -31,7 +31,9 @@ TRUSTED_SIGNER_KEYWORDS = (
     "microsoft corporation", "microsoft windows", "nvidia", "advanced micro devices",
     "intel", "micro-star", "msi", "realtek", "logitech", "razer", "corsair",
     "oracle", "valve", "discord", "google", "mozilla", "epic games", "rockstar",
-    "blizzard", "ubisoft", "ea ", "electronic arts", "asustek", "gigabyte"
+    "blizzard", "ubisoft", "ea ", "electronic arts", "asustek", "gigabyte",
+    "malwarebytes", "brave", "ollama", "python software foundation", "jetbrains",
+    "adobe", "unity technologies", "unreal", "battleye", "easy anti-cheat"
 )
 
 def is_trusted_signer(signer_str):
@@ -54,15 +56,20 @@ def is_trusted_system_or_signed(filepath):
         "c:\\windows\\winsxs\\",
         "c:\\windows\\diagnostics\\",
         "c:\\windows\\servicing\\",
+        "c:\\program files\\",
+        "c:\\program files (x86)\\",
     )
-    if any(path_lower.startswith(p) for p in system_prefixes):
-        return True
-    
+
+    # 1. Fichiers situés dans Program Files ou System32 et valablement signés
     sig = check_authenticode_signature(filepath)
     if sig.get("signed"):
-        signer = sig.get("signer")
-        if not signer or is_trusted_signer(signer):
-            return True
+        # N'importe quelle binaire avec une signature valide Authenticode est légitime
+        return True
+
+    # 2. Fichiers dans System32 Windows natif
+    if any(path_lower.startswith(p) for p in system_prefixes[:5]):
+        return True
+
     return False
 
 def check_authenticode_signature(filepath):

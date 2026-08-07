@@ -62,8 +62,9 @@ def verify_and_claim_pin(raw_pin_code: str, hwid: str) -> dict:
     if not raw_pin_code:
         return {"valid": False, "reason": "Code PIN vide."}
 
-    clean_pin = raw_pin_code.strip().upper()
-    if len(clean_pin) < 4 or len(clean_pin) > 10:
+    # Nettoyer les caractères BOM (\ufeff) et non-ASCII invisibles (copier-coller/pipe PowerShell)
+    clean_pin = re.sub(r'[^A-Za-z0-9\-]', '', raw_pin_code.lstrip('\ufeff')).strip().upper()
+    if len(clean_pin) < 4 or len(clean_pin) > 12:
         return {"valid": False, "reason": "Format de code PIN invalide (format attendu : XX-XXXX)."}
 
     try:
