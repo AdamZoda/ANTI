@@ -495,9 +495,8 @@ def _identify_cheat_by_binary_strings(file_path: str, max_read: int = 5 * 1024 *
                 best_match_name  = cheat_name
                 best_matched     = matched
 
-        # Seuil relevé à 3 patterns distincts pour confirmer (anti-FP renforcé)
-        # Avec 2 c'était trop facile de matcher par accident (VirtualBox, regedit, etc.)
-        if best_score >= 3 and best_match_name:
+        # Seuil ajusté à >= 1 pour une sensibilité maximale (détection immédiate dès la première empreinte de cheat)
+        if best_score >= 1 and best_match_name:
             return {
                 "real_name"     : best_match_name,
                 "matched_strings": best_matched[:5],
@@ -3211,10 +3210,15 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "cache", "subprocess"),
         os.path.join(local_appdata, "FiveM", "FiveM.app", "crashes"),
 
-        # Bureau et Téléchargements (source principale de cheats)
+        # Bureau et Téléchargements (y compris répertoires OneDrive et sous-dossiers utilisateurs)
         os.path.join(user_profile, "Desktop"),
         os.path.join(user_profile, "Downloads"),
         os.path.join(user_profile, "Documents"),
+        os.path.join(user_profile, "Videos"),
+        os.path.join(user_profile, "Pictures"),
+        os.path.join(user_profile, "OneDrive", "Desktop"),
+        os.path.join(user_profile, "OneDrive", "Downloads"),
+        os.path.join(user_profile, "OneDrive", "Documents"),
 
         # Temp
         temp_dir,
@@ -3227,6 +3231,7 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
         os.path.join(local_appdata, "Packages"),
         os.path.join(appdata, "discord"),
         os.path.join(local_appdata, "discord"),
+        os.path.join(local_appdata, "Programs"),
     ]
 
     # Lecteurs secondaires (D:, E:, etc.)
@@ -3257,18 +3262,16 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
     def _get_depth_limit(directory: str) -> int:
         d_lower = directory.lower()
         if "fivem.app" in d_lower or "cfx.re" in d_lower:
-            return 3
+            return 4
         if "fivem" in d_lower and "subprocess" in d_lower:
-            return 2
+            return 3
         if "recent" in d_lower:
-            return 1
+            return 2
         if "$recycle.bin" in d_lower:
-            return 1
-        if "desktop" in d_lower or "downloads" in d_lower:
             return 2
-        if "temp" in d_lower:
-            return 2
-        return 2
+        if any(k in d_lower for k in ("desktop", "downloads", "documents", "onedrive", "temp", "programs")):
+            return 5
+        return 4
 
     def _sanitize_display(name):
         """Affiche le nom du fichier sans données sensibles (tokens, IDs, etc.)."""
