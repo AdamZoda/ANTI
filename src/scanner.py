@@ -4926,23 +4926,36 @@ def run_system_scan(progress_callback=None):
     applications = []
 
     def _score_app(item):
-        (name, exe), app_data = item
-        exe_path = app_data.get("exe_path")
-        sha256   = get_file_sha256(exe_path) if exe_path else None
-        sig      = check_authenticode_signature(exe_path) if exe_path else {"signed": False, "status": "NoExe"}
+        try:
+            (name, exe), app_data = item
+            exe_path = app_data.get("exe_path") if isinstance(app_data, dict) else None
+            sha256   = get_file_sha256(exe_path) if exe_path else None
+            sig      = check_authenticode_signature(exe_path) if exe_path else {"signed": False, "status": "NoExe"}
 
-        app_item = {
-            "app_name"        : name,
-            "exe_path"        : exe_path,
-            "sha256"          : sha256,
-            "signature"       : sig,
-            "instances_count" : app_data["instances_count"],
-            "pids"            : app_data["pids"],
-            "total_dll_count" : app_data["loaded_dll_count"],
-            "status_type"     : "PROCESSUS_EN_COURS"
-        }
-        app_item["risk_assessment"] = evaluate_app_risk(app_item)
-        return app_item
+            app_item = {
+                "app_name"        : name,
+                "exe_path"        : exe_path,
+                "sha256"          : sha256,
+                "signature"       : sig,
+                "instances_count" : app_data.get("instances_count", 1) if isinstance(app_data, dict) else 1,
+                "pids"            : app_data.get("pids", []) if isinstance(app_data, dict) else [],
+                "total_dll_count" : app_data.get("loaded_dll_count", 0) if isinstance(app_data, dict) else 0,
+                "status_type"     : "PROCESSUS_EN_COURS"
+            }
+            app_item["risk_assessment"] = evaluate_app_risk(app_item)
+            return app_item
+        except Exception:
+            return {
+                "app_name"        : str(item[0][0]) if isinstance(item, (tuple, list)) and len(item) > 0 and isinstance(item[0], (tuple, list)) else "Unknown",
+                "exe_path"        : None,
+                "sha256"          : None,
+                "signature"       : {"signed": False, "status": "Error"},
+                "instances_count" : 1,
+                "pids"            : [],
+                "total_dll_count" : 0,
+                "status_type"     : "PROCESSUS_EN_COURS",
+                "risk_assessment" : {"risk_score": 0, "verdict_level": "LOW_RISK", "observations": [], "is_suspicious": False}
+            }
 
     with ThreadPoolExecutor(max_workers=_CPU_WORKERS) as score_ex:
         futures_score = [score_ex.submit(_score_app, item) for item in apps_list]

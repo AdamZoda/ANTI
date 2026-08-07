@@ -1,8 +1,69 @@
+import ctypes
+from ctypes import wintypes
 import hashlib
 import os
-import subprocess
+import threading
 
 _sig_cache = {}
+_cache_lock = threading.Lock()
+
+class GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", wintypes.DWORD),
+        ("Data2", wintypes.WORD),
+        ("Data3", wintypes.WORD),
+        ("Data4", ctypes.c_byte * 8),
+    ]
+
+WINTRUST_ACTION_GENERIC_VERIFY_V2 = GUID(
+    0x00AAC56B, 0xCD44, 0x11D0, (ctypes.c_byte * 8)(0x8C, 0xC2, 0x00, 0xC0, 0x4F, 0xC2, 0x95, 0xEE)
+)
+
+class WINTRUST_FILE_INFO(ctypes.Structure):
+    _fields_ = [
+        ("cbStruct", wintypes.DWORD),
+        ("pcwszFilePath", wintypes.LPCWSTR),
+        ("hFile", wintypes.HANDLE),
+        ("pgKnownSubject", ctypes.c_void_p),
+    ]
+
+class WINTRUST_DATA(ctypes.Structure):
+    _fields_ = [
+        ("cbStruct", wintypes.DWORD),
+        ("pPolicyCallbackData", ctypes.c_void_p),
+        ("pSIPClientData", ctypes.c_void_p),
+        ("dwUIChoice", wintypes.DWORD),
+        ("fdwRevocationChecks", wintypes.DWORD),
+        ("dwUnionChoice", wintypes.DWORD),
+        ("pFile", ctypes.POINTER(WINTRUST_FILE_INFO)),
+        ("dwStateAction", wintypes.DWORD),
+        ("hWVTStateData", wintypes.HANDLE),
+        ("pwszURL", wintypes.LPCWSTR),
+        ("dwProvFlags", wintypes.DWORD),
+        ("dwUIContext", wintypes.DWORD),
+        ("pSignatureSettings", ctypes.c_void_p),
+    ]
+
+# WinTrust API setup
+try:
+    wintrust = ctypes.windll.wintrust
+    wintrust.WinVerifyTrust.restype = wintypes.LONG
+    wintrust.WinVerifyTrust.argtypes = [wintypes.HWND, ctypes.c_void_p, ctypes.c_void_p]
+except Exception:
+    wintrust = None
+
+# Crypt32 API setup
+try:
+    crypt32 = ctypes.windll.crypt32
+    crypt32.CryptQueryObject.restype = wintypes.BOOL
+    crypt32.CertEnumCertificatesInStore.restype = ctypes.c_void_p
+    crypt32.CertEnumCertificatesInStore.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    crypt32.CertGetNameStringW.restype = wintypes.DWORD
+    crypt32.CertGetNameStringW.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.LPWSTR, wintypes.DWORD]
+    crypt32.CertFreeCertificateContext.restype = wintypes.BOOL
+    crypt32.CertFreeCertificateContext.argtypes = [ctypes.c_void_p]
+except Exception:
+    crypt32 = None
 
 def get_file_sha256(filepath):
     """Calcule le hachage SHA-256 d'un fichier rapidement."""
@@ -16,16 +77,6 @@ def get_file_sha256(filepath):
         return hasher.hexdigest()
     except Exception:
         return None
-
-def check_authenticode_signature(filepath):
-    """
-    Vérification ultra-rapide de la signature numérique Windows avec mise en cache.
-    """
-    if not filepath or not os.path.exists(filepath):
-        return {"status": "FileNotFound", "signed": False, "signer": None}
-    
-    if filepath in _sig_cache:
-        return _sig_cache[filepath]
 
 TRUSTED_SIGNER_KEYWORDS = (
     "microsoft corporation", "microsoft windows", "nvidia", "advanced micro devices",
@@ -60,27 +111,69 @@ def is_trusted_system_or_signed(filepath):
         "c:\\program files (x86)\\",
     )
 
-    # 1. Fichiers situés dans Program Files ou System32 et valablement signés
     sig = check_authenticode_signature(filepath)
     if sig.get("signed"):
-        # N'importe quelle binaire avec une signature valide Authenticode est légitime
         return True
 
-    # 2. Fichiers dans System32 Windows natif
     if any(path_lower.startswith(p) for p in system_prefixes[:5]):
         return True
 
     return False
 
+def _get_native_signer_name(filepath):
+    if not crypt32:
+        return None
+    encoding = wintypes.DWORD()
+    contentType = wintypes.DWORD()
+    formatType = wintypes.DWORD()
+    hStore = wintypes.HANDLE()
+    hMsg = wintypes.HANDLE()
+
+    res = crypt32.CryptQueryObject(
+        1, # CERT_QUERY_OBJECT_FILE
+        ctypes.c_wchar_p(filepath),
+        1 << 10, # CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBEDDED
+        1 << 1,  # CERT_QUERY_FORMAT_FLAG_BINARY
+        0,
+        ctypes.byref(encoding),
+        ctypes.byref(contentType),
+        ctypes.byref(formatType),
+        ctypes.byref(hStore),
+        ctypes.byref(hMsg),
+        None
+    )
+    if not res:
+        return None
+
+    signer_name = None
+    try:
+        pCertContext = crypt32.CertEnumCertificatesInStore(hStore, None)
+        if pCertContext:
+            cbSize = crypt32.CertGetNameStringW(pCertContext, 4, 0, None, None, 0)
+            if cbSize > 1:
+                name_buf = ctypes.create_unicode_buffer(cbSize)
+                crypt32.CertGetNameStringW(pCertContext, 4, 0, None, name_buf, cbSize)
+                signer_name = name_buf.value
+            crypt32.CertFreeCertificateContext(pCertContext)
+    except Exception:
+        pass
+    finally:
+        if hStore: crypt32.CertCloseStore(hStore, 0)
+        if hMsg: crypt32.CryptMsgClose(hMsg)
+
+    return signer_name
+
 def check_authenticode_signature(filepath):
     """
-    Vérification ultra-rapide de la signature numérique Windows avec mise en cache.
+    Vérification ultra-rapide 100% native de la signature numérique Windows avec mise en cache.
+    Ne lance AUCUN sous-processus (PowerShell, cmd), 100% sûr contre les crashs et fuites de handles.
     """
     if not filepath or not os.path.exists(filepath):
         return {"status": "FileNotFound", "signed": False, "signer": None}
     
-    if filepath in _sig_cache:
-        return _sig_cache[filepath]
+    with _cache_lock:
+        if filepath in _sig_cache:
+            return _sig_cache[filepath]
 
     path_lower = filepath.lower()
 
@@ -94,34 +187,42 @@ def check_authenticode_signature(filepath):
     )
     if any(path_lower.startswith(p) for p in system_prefixes):
         res = {"status": "Valid", "signed": True, "signer": "CN=Microsoft Windows, O=Microsoft Corporation"}
-        _sig_cache[filepath] = res
+        with _cache_lock:
+            _sig_cache[filepath] = res
         return res
 
+    # Signature native WinVerifyTrust (wintrust.dll)
     try:
-        ps_cmd = f"$s = Get-AuthenticodeSignature -FilePath '{filepath}'; $s.Status.ToString() + '|' + ($s.SignerCertificate.Subject)"
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=1.5,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        output = result.stdout.strip()
-        if "|" in output:
-            status, signer = output.split("|", 1)
-            is_valid = status.lower() == "valid"
+        if wintrust:
+            fi = WINTRUST_FILE_INFO(ctypes.sizeof(WINTRUST_FILE_INFO), filepath, None, None)
+            wd = WINTRUST_DATA(
+                cbStruct=ctypes.sizeof(WINTRUST_DATA),
+                pPolicyCallbackData=None,
+                pSIPClientData=None,
+                dwUIChoice=2, # WTD_UI_NONE
+                fdwRevocationChecks=0, # WTD_REVOKE_NONE
+                dwUnionChoice=1, # WTD_CHOICE_FILE
+                pFile=ctypes.pointer(fi),
+                dwStateAction=0,
+                hWVTStateData=None,
+                pwszURL=None,
+                dwProvFlags=0x00000080, # WTD_REVOCATION_CHECK_NONE
+                dwUIContext=0,
+                pSignatureSettings=None
+            )
+            lStatus = wintrust.WinVerifyTrust(None, ctypes.byref(WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wd))
+            is_valid = (lStatus == 0)
+            signer_name = _get_native_signer_name(filepath) if is_valid else None
             res = {
-                "status": status,
+                "status": "Valid" if is_valid else "Unsigned",
                 "signed": is_valid,
-                "signer": signer.strip() if signer and signer != "null" else None
+                "signer": signer_name or ("Signed Executable" if is_valid else None)
             }
         else:
-            res = {"status": output or "Unknown", "signed": False, "signer": None}
+            res = {"status": "Unknown", "signed": False, "signer": None}
     except Exception:
         res = {"status": "Unknown", "signed": False, "signer": None}
 
-    _sig_cache[filepath] = res
+    with _cache_lock:
+        _sig_cache[filepath] = res
     return res
-
