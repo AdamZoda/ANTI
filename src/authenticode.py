@@ -97,18 +97,14 @@ def is_trusted_system_or_signed(filepath):
     """
     Vérifie si le fichier est un composant système Windows officiel
     ou possède une signature valide d'un éditeur de confiance reconnu.
-    Ne fait JAMAIS confiance aux dossiers utilisateurs temporaires/téléchargements (Desktop, Downloads, Temp, etc.).
     """
     if not filepath or not os.path.exists(filepath):
         return False
     path_lower = filepath.lower()
 
-    # Ne JAMAIS considérer comme "de confiance" un fichier situé dans des zones de cheats typiques
-    high_risk_dirs = (
-        "\\downloads\\", "\\desktop\\", "\\temp\\", "\\appdata\\local\\temp\\",
-        "\\users\\public\\", "\\documents\\", "\\onedrive\\"
-    )
-    if any(hrd in path_lower for hrd in high_risk_dirs):
+    # Ne JAMAIS considérer comme "de confiance" un fichier situé dans des zones de téléchargement/bureau publiques
+    untrusted_dirs = ("\\downloads\\", "\\desktop\\", "\\users\\public\\")
+    if any(ud in path_lower for ud in untrusted_dirs):
         return False
 
     # Fichiers situés dans System32 / SysWOW64 Windows natif
@@ -122,12 +118,11 @@ def is_trusted_system_or_signed(filepath):
     if any(path_lower.startswith(p) for p in system_prefixes):
         return True
 
-    # Vérification signature Authenticode : seul un éditeur RECONNU dans Program Files est de confiance
+    # Vérification signature Authenticode : si le signer est de confiance
     sig = check_authenticode_signature(filepath)
     if sig.get("signed"):
         signer = sig.get("signer")
-        program_prefixes = ("c:\\program files\\", "c:\\program files (x86)\\")
-        if any(path_lower.startswith(pp) for pp in program_prefixes) and is_trusted_signer(signer):
+        if is_trusted_signer(signer):
             return True
 
     return False

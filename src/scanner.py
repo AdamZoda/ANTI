@@ -122,6 +122,7 @@ IGNORED_EXTENSIONS = {
     ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".csv",
     ".css", ".html", ".htm", ".json", ".xml", ".log", ".md", ".ttf", ".woff", ".woff2",
     ".dat", ".tmp", ".pak", ".bin", ".cache", ".idx", ".db", ".sqlite", ".store",
+    ".pyi", ".pyc", ".py", ".git", ".vsix",
     # Assets de jeu GTA (volumeux, inutile de les scanner)
     ".rpf", ".yft", ".ytd", ".ymap", ".ytyp", ".ydr", ".ydd", ".ybn",
     ".ycd", ".ysc", ".gfx", ".dds",
@@ -388,6 +389,51 @@ CHEAT_BINARY_SIGNATURES = {
 }
 
 
+def _is_legitimate_path(path: str) -> bool:
+    """
+    Vérifie si un chemin de fichier ou dossier appartient à un environnement de développement,
+    de jeu ou système connu et légitime, afin d'éviter tout faux positif.
+    """
+    p_lower = path.lower()
+    safe_keywords = (
+        "steamapps", "steamlibrary", "epic games", "origin games", "gog games", "ubisoft", "xboxgames",
+        "tomb raider", "visual studio", "vscode", "vs code", "programs\\python", "site-packages",
+        "node_modules", "node.js", ".git", ".venv", "env", "packages", "windowsapps",
+        "microsoft", "windows defender", "intel", "nvidia", "amd", "realtek", "driver",
+        "adobefile", "cache\\fivem", "citizenfx", "citizen\\system_resources", "appdata\\local\\programs\\python",
+        # IDEs et éditeurs
+        "antigravity ide", "programs\\antigravity", "programs\\cursor", "programs\\jetbrains",
+        # GPU & librairies système tierces
+        "ollama", "programs\\ollama", "vulkan", "libgl", "opengl",
+        # FiveM server (serveur local de jeu, pas cheats)
+        "citizen\\scripting", "citizen\\clr", "fxserver",
+        # Extensions VS Code / Antigravity IDE (thèmes, grammaires, etc.)
+        "resources\\app\\extensions",
+        # Python temp / cache / bytecode / PyInstaller
+        "_mei", "__pycache__", "pyrefly_bundled", "pythonnet", "python311", "python312",
+        "lib\\site-packages", "lib\\__phello__",
+        # Outils de développement légitimes
+        "git\\mingw64", "git\\cmd", "git\\usr", "git-core",
+        "antigravity-ide", ".gemini\\antigravity",
+        # Programmes Python communs (instaloader, etc.)
+        "scripts\\instaloader", "fanstatic", "docutils", "ldap3",
+        "impacket", "lunardate", "pyinstaller",
+    )
+    if any(k in p_lower for k in safe_keywords):
+        return True
+    # ── Notre propre code source uniquement (PAS les cheats de test dans cheat/ ou spoofer/) ──
+    anti_src_markers = [
+        "documents\\anti\\src\\", "documents\\anti\\dist\\",
+        "documents\\anti\\.git\\", "documents\\anti\\anti-scan.spec",
+        "documents\\anti\\main.py",
+    ]
+    if any(m in p_lower for m in anti_src_markers):
+        return True
+    if "appdata\\local\\programs" in p_lower:
+        return True
+    return False
+
+
 def _identify_cheat_by_binary_strings(file_path: str, max_read: int = 5 * 1024 * 1024) -> dict | None:
     """
     Extrait les chaînes ASCII et UTF-16LE embarquées dans un binaire PE
@@ -403,14 +449,25 @@ def _identify_cheat_by_binary_strings(file_path: str, max_read: int = 5 * 1024 *
     try:
         if not os.path.isfile(file_path):
             return None
+        if _is_legitimate_path(file_path):
+            return None
         fsize = os.path.getsize(file_path)
         if fsize < 512:
             return None
 
         # ── ANTI-FP : Skip les binaires signés par un éditeur connu ──
-        # VirtualBox (Oracle), BlueStacks, Malwarebytes, Brave, etc.
-        # ne doivent JAMAIS être flaggés via fingerprinting
         if is_trusted_system_or_signed(file_path):
+            return None
+
+        # ── ANTI-FP : Skip les modules Python connus (_ssl.pyd, _hashlib.pyd, etc.) ──
+        _fp = file_path.lower()
+        _bn = os.path.basename(_fp)
+        _KNOWN_LEGIT_PYTHON_MODULES = {
+            "_ssl.pyd", "_hashlib.pyd", "_sqlite3.pyd", "_lzma.pyd", "_bz2.pyd",
+            "_decimal.pyd", "_ctypes.pyd", "_queue.pyd", "_testcapi.pyd",
+            "pyexpat.pyd", "select.pyd", "unicodedata.pyd", "winsound.pyd",
+        }
+        if _bn in _KNOWN_LEGIT_PYTHON_MODULES and any(k in _fp for k in ["python3", "python2", "_mei"]):
             return None
 
         with open(file_path, "rb") as f:
@@ -495,8 +552,15 @@ def _identify_cheat_by_binary_strings(file_path: str, max_read: int = 5 * 1024 *
                 best_match_name  = cheat_name
                 best_matched     = matched
 
-        # Seuil ajusté à >= 1 pour une sensibilité maximale (détection immédiate dès la première empreinte de cheat)
-        if best_score >= 1 and best_match_name:
+        # Exiger >= 2 correspondances pour éviter les FP (ex: OpenSSL avec aria_key)
+        # sauf si la correspondance unique est longue et très spécifique (ex: eulen_cheat, stand_bypass)
+        is_strong_single_match = False
+        if best_score == 1 and best_matched:
+            single_pattern = best_matched[0].lower()
+            if len(single_pattern) >= 10 and any(kw in single_pattern for kw in ["loader", "cheat", "menu", "bypass", "exec", "cleaner", "hacks"]):
+                is_strong_single_match = True
+
+        if (best_score >= 2 or is_strong_single_match) and best_match_name:
             return {
                 "real_name"     : best_match_name,
                 "matched_strings": best_matched[:5],
@@ -1666,6 +1730,8 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
     try:
         if not os.path.isfile(file_path):
             return None
+        if _is_legitimate_path(file_path):
+            return None
         if is_trusted_system_or_signed(file_path):
             return None
         fsize = os.path.getsize(file_path)
@@ -1674,6 +1740,9 @@ def _check_pe_imports_danger(file_path: str) -> dict | None:
 
         with open(file_path, "rb") as f:
             data = f.read(min(fsize, 10_000_000))
+
+        if not data.startswith(b'MZ'):
+            return None
 
         hits = []
         total_score = 0
@@ -1904,10 +1973,16 @@ def _check_pe_sections_anomaly(file_path: str) -> dict | None:
         "discord", "chromium", "chrome", "edge", "electron", "cef",
         "fivem.app", "steam", "epic games", "medal",
         "windowsapps", "program files",
+        # GPU / Vulkan libraries légitimes
+        "ollama", "vulkan", "libgl", "opengl", "libvk", "nvcuda", "nvopencl",
+        # IDEs / Antigravity
+        "antigravity ide", "programs\\antigravity",
     )
 
     try:
         if not os.path.isfile(file_path):
+            return None
+        if _is_legitimate_path(file_path):
             return None
         if is_trusted_system_or_signed(file_path):
             return None
@@ -2743,6 +2818,8 @@ def _check_pe_virtualizer_anomaly(file_path: str) -> dict:
     try:
         if not os.path.isfile(file_path) or os.path.getsize(file_path) < 1024:
             return None
+        if _is_legitimate_path(file_path):
+            return None
         if is_trusted_system_or_signed(file_path):
             return None
 
@@ -2863,7 +2940,9 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
     path_lower = _clean_path.lower().strip()
     ext = os.path.splitext(name_lower)[1]
 
-    # Ignorer les frameworks légitimes
+    # Ignorer les répertoires et frameworks légitimes
+    if _is_legitimate_path(path_lower or name_lower):
+        return None
     if any(legit in name_lower or legit in path_lower for legit in LEGITIMATE_FRAMEWORKS):
         return None
 
@@ -2882,6 +2961,311 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
                 # Fichier système légitime dans son dossier officiel
                 return None
 
+    # 2. Scan binaire PE PROFOND — le vrai détecteur
+    if ext in ('.exe', '.dll', '.sys') and full_path and os.path.isfile(full_path):
+        deep = _deep_binary_analysis(full_path)
+        if deep["is_cheat"]:
+            return {
+                "is_cheat": True,
+                "severity": deep["severity"],
+                "reason": f"Scan binaire PE : score={deep['score']}/100. {' | '.join(deep['reasons'][:4])}"
+            }
+
+    # 3. Scan YARA rules — pattern matching avancé
+    if ext in ('.exe', '.dll', '.sys', '.asi', '.lua') and full_path and os.path.isfile(full_path):
+        yara_matches = scan_yara_rules(full_path)
+        if yara_matches:
+            rules_str = ", ".join([m["rule"] for m in yara_matches[:3]])
+            return {
+                "is_cheat": True,
+                "severity": "CRITICAL",
+                "reason": f"YARA rule match: {rules_str}. {' | '.join([m['description'] for m in yara_matches[:3]])}"
+            }
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# SCAN BINAIRE PE PROFOND — Le VRAI détecteur de cheats
+# Analyse les imports, les sections, les packers, les strings
+# ═══════════════════════════════════════════════════════════════
+
+    # APIs Windows dangereuses utilisées par les cheats (score = dangerosité)
+# ⚠️ APIs communes (GetDC, IsDebuggerPresent, etc.) = score BAS car beaucoup de FP
+_DANGEROUS_APIS = {
+    # ── Injection mémoire (CRITIQUE — rares en dehors des cheats) ──
+    b"VirtualAllocEx": 80, b"WriteProcessMemory": 95,
+    b"CreateRemoteThread": 95, b"NtCreateThreadEx": 95,
+    b"QueueUserAPC": 70, b"NtQueueApcThread": 70,
+    b"RtlCreateUserThread": 90,
+    b"NtUnmapViewOfSection": 90,  # Process hollowing
+    b"SetThreadContext": 70, b"GetThreadContext": 50,
+    b"SuspendThread": 50, b"ResumeThread": 40,
+    # ── Hooking (SUSPECT — mais certains jeux légitimes l'utilisent) ──
+    b"SetWindowsHookExA": 55, b"SetWindowsHookExW": 55,
+    b"UnhookWindowsHookEx": 35,
+    # ── Mémoire externe (SUSPECT) ──
+    b"ReadProcessMemory": 85, b"OpenProcess": 40,
+    b"VirtualProtectEx": 60,
+    # ── Capture d'écran / Overlay (FAIBLE — beaucoup de FP, apps légitimes) ──
+    b"BitBlt": 10, b"StretchBlt": 10, b"GetDC": 5,
+    b"CreateCompatibleDC": 5, b"GetDIBits": 5,
+    # ── Keylog / Input (FAIBLE — games, etc.) ──
+    b"GetAsyncKeyState": 15, b"GetKeyState": 10,
+    b"GetRawInputData": 10,
+    # ── Téléchargement / Dropper (SUSPECT) ──
+    b"URLDownloadToFileA": 75, b"URLDownloadToFileW": 75,
+    b"InternetOpenA": 40, b"InternetOpenW": 40,
+    b"HttpSendRequestA": 35, b"HttpSendRequestW": 35,
+    # ── Anti-détection (FAIBLE — beaucoup de FP) ──
+    b"IsDebuggerPresent": 10, b"CheckRemoteDebuggerPresent": 25,
+    b"NtQueryInformationProcess": 35, b"OutputDebugStringA": 5,
+    # ── Registry (FAIBLE — légitime pour beaucoup d'apps) ──
+    b"RegSetValueExA": 10, b"RegSetValueExW": 10,
+    # ── Élévation de privilèges (SUSPECT) ──
+    b"AdjustTokenPrivileges": 40, b"SeDebugPrivilege": 50,
+    b"CreateServiceA": 50, b"CreateServiceW": 50,
+    b"MiniDumpWriteDump": 60,  # Credential theft
+}
+
+# Signatures de packers connus (détectés par leurs noms de section ou strings)
+_PACKER_SIGNATURES = {
+    "VMProtect":    [b"vmp0", b"vmp1", b"vmp2", b"VMProtect", b".vmp", b"vmprotect"],
+    "Themida":      [b".themida", b"Oreans", b"Code Virtualizer", b"VM_Toon"],
+    "UPX":          [b"UPX0", b"UPX1", b"UPX!", b"UPX2", b"UPX."],
+    "ASPack":       [b".aspack", b"ASPack", b"ASPack2"],
+    "MPRESS":       [b"MPRESS1", b"MPRESS2", b".MPRESS"],
+    "PECompact":    [b"PEC2", b"pec2", b"PECompact", b".PEC2"],
+    "Enigma":       [b"Enigma Protector", b".enigma", b"EnigmaVirtualizer"],
+    "Armadillo":    [b"Armadillo", b"nanomite"],
+    "Obsidium":     [b"Obsidium", b".obsidium"],
+    "Custom":       [b"protect", b"encrypt", b"obfusc", b"scramble", b"packed"],
+}
+
+# Strings suspects dans les binaires (URLs, noms de cheats, techniques)
+_SUSPICIOUS_BINARY_STRINGS = {
+    "cheat_urls": [
+        b"discord.gg/", b"discord.com/invite/", b"discord.com/api/webhooks",
+        b"unknowncheats.me", b"mpgh.net", b"cheathappens.com",
+        b"gamecopyworld.com", b"gta5mods.com",
+    ],
+    "cheat_names": [
+        b"NitWit", b"NitWitLoader", b"Eulen", b"RedEngine", b"StandMenu",
+        b"Kiddion", b"Cherax", b"2Take1", b"Impulse", b"Ozark", b"LunaMenu",
+        b"Dopamine", b"HamMafia", b"PhantomX", b"Menyoo", b"Fallout",
+        b"SkriptExecutor", b"HXMenu", b"HXHacks", b"LynxMenu",
+    ],
+    "technique_words": [
+        b"aimbot", b"wallhack", b"triggerbot", b"silentaim",
+        b"bypass", b"inject", b"hook", b"overlay", b"streamproof",
+        b"spoof", b"hwid", b"modmenu", b"mod_menu",
+        b"lua_executor", b"js_executor", b"skript_executor",
+        # ⚠️ "esp" seul est trop commun (response, exception, etc.)
+        # On cherche des patterns plus spécifiques
+        b"esp_hack", b"esp_wallhack", b"game_overlay",
+        b"esp_engine", b"chams", b"glow",
+    ],
+    "fivem_specific": [
+        b"FiveM", b"cfx.re", b"citizenfx", b"lua_executor",
+        b"js_executor", b"skript_executor", b"fivemcheat",
+    ],
+    "dropper_patterns": [
+        b"CreateServiceA", b"CreateServiceW",  # Installation de service
+        b"StartServiceA", b"StartServiceW",
+        b"AdjustTokenPrivileges", b"SeDebugPrivilege",  # Élévation de privilèges
+        b"MiniDumpWriteDump",  # Dump mémoire (credential theft)
+        b"SetFileAttributesA", b"SetFileAttributesW",  # Cache de fichiers
+        b"MoveFileExA", b"MoveFileExW",  # Renommage au reboot
+    ],
+}
+
+
+def _deep_binary_analysis(file_path: str) -> dict:
+    """
+    Scan binaire PE profond — analyse les imports, sections, packers, strings.
+    Retourne un score de dangerosité (0-100) et des détails.
+    """
+    result = {
+        "score": 0,
+        "severity": "LOW",
+        "is_cheat": False,
+        "import_score": 0,
+        "packer_detected": None,
+        "dangerous_apis": [],
+        "suspicious_strings": [],
+        "section_anomalies": [],
+        "reasons": [],
+    }
+
+    try:
+        if not os.path.isfile(file_path):
+            return result
+        fsize = os.path.getsize(file_path)
+        if fsize < 512:
+            return result
+        if _is_legitimate_path(file_path):
+            return result
+        if is_trusted_system_or_signed(file_path):
+            return result
+
+        with open(file_path, "rb") as f:
+            raw = f.read(min(fsize, 10 * 1024 * 1024))  # Max 10 MB
+
+        # ── 1. Vérifier que c'est un PE ──
+        if not raw[:2] == b'MZ':
+            return result
+
+        pe_offset = struct.unpack('<I', raw[0x3C:0x40])[0]
+        if pe_offset + 26 > len(raw):
+            return result
+
+        num_sections = struct.unpack('<H', raw[pe_offset+6:pe_offset+8])[0]
+        opt_hdr_size = struct.unpack('<H', raw[pe_offset+20:pe_offset+22])[0]
+        sec_offset = pe_offset + 24 + opt_hdr_size
+
+        # ── 2. Analyse des imports (IAT) ──
+        # Chercher les noms d'API dans tout le binaire (plus fiable que parser l'IAT)
+        import_score = 0
+        found_apis = []
+        for api_name, danger_score in _DANGEROUS_APIS.items():
+            if api_name in raw:
+                import_score += danger_score
+                found_apis.append(api_name.decode('ascii', errors='ignore'))
+
+        # Normaliser le score (0-100)
+        import_score = min(100, import_score)
+        result["import_score"] = import_score
+        result["dangerous_apis"] = found_apis[:15]  # Top 15
+
+        if found_apis:
+            result["reasons"].append(
+                f"APIs dangereuses importées ({len(found_apis)}) : {', '.join(found_apis[:8])}"
+            )
+
+        # ── 3. Détection de packers ──
+        packer_found = None
+        for packer_name, signatures in _PACKER_SIGNATURES.items():
+            for sig in signatures:
+                if sig in raw:
+                    packer_found = packer_name
+                    result["reasons"].append(f"Packer détecté : {packer_name}")
+                    break
+            if packer_found:
+                break
+        result["packer_detected"] = packer_found
+
+        # ── 4. Analyse des sections PE ──
+        high_entropy_count = 0
+        ep_not_in_text = False
+        ep_section = ""
+        scrambled_sections = []
+
+        for i in range(min(num_sections, 50)):
+            s = sec_offset + i * 40
+            if s + 40 > len(raw):
+                break
+            sec_data = raw[s:s+40]
+            sec_name_raw = sec_data[:8].rstrip(b'\x00')
+            sec_name = sec_name_raw.decode('ascii', errors='replace').lower().strip()
+            v_addr = struct.unpack('<I', sec_data[12:16])[0]
+            v_size = struct.unpack('<I', sec_data[8:12])[0]
+            raw_size = struct.unpack('<I', sec_data[16:20])[0]
+            raw_off = struct.unpack('<I', sec_data[20:24])[0]
+
+            # Noms scramblés / non-ASCII
+            if any(c not in range(32, 127) for c in sec_name_raw if c != 0):
+                scrambled_sections.append(repr(sec_name_raw))
+
+            # EP dans une section suspecte
+            ep_rva = struct.unpack('<I', raw[pe_offset+40:pe_offset+44])[0]
+            if v_addr <= ep_rva < v_addr + max(v_size, raw_size):
+                ep_section = sec_name
+                if sec_name not in (".text", ".code", ""):
+                    ep_not_in_text = True
+
+            # Entropie sectionnelle
+            if raw_size > 512 and raw_off > 0 and raw_off + raw_size <= len(raw):
+                try:
+                    chunk = raw[raw_off:raw_off + min(raw_size, 131072)]
+                    if len(chunk) > 256:
+                        import math
+                        freq = [0] * 256
+                        for b in chunk:
+                            freq[b] += 1
+                        ent = 0.0
+                        for fr in freq:
+                            if fr:
+                                p = fr / len(chunk)
+                                ent -= p * math.log2(p)
+                        if ent > 7.4 and sec_name not in (".rsrc", ".reloc", ".rdata"):
+                            high_entropy_count += 1
+                except Exception:
+                    pass
+
+        if scrambled_sections:
+            result["section_anomalies"].append(f"Sections scramblées : {', '.join(scrambled_sections[:3])}")
+            result["score"] += 70
+        if ep_not_in_text:
+            result["section_anomalies"].append(f"EP dans section '{ep_section}' (hors .text)")
+            result["score"] += 50
+        if high_entropy_count >= 2:
+            result["section_anomalies"].append(f"{high_entropy_count} sections à haute entropie (>7.4)")
+            result["score"] += 30 * high_entropy_count
+
+        # ── 5. Scan de strings suspects ──
+        found_strings = []
+        for category, patterns in _SUSPICIOUS_BINARY_STRINGS.items():
+            for pattern in patterns:
+                if pattern in raw:
+                    found_strings.append(f"{category}:{pattern.decode('ascii', errors='ignore')}")
+        result["suspicious_strings"] = found_strings[:20]
+
+        if found_strings:
+            result["score"] += min(40, len(found_strings) * 5)
+            result["reasons"].append(
+                f"Strings suspects trouvées ({len(found_strings)}) : {', '.join(found_strings[:5])}"
+            )
+
+        # ── 6. Overlay (données après le PE) ──
+        pe_end = sec_offset + num_sections * 40
+        if pe_end < len(raw) - 1024:
+            overlay_size = len(raw) - pe_end
+            if overlay_size > 4096:
+                result["score"] += 30
+                result["reasons"].append(f"Overlay détecté ({overlay_size} octets après le PE)")
+
+        # ── 7. Score final ──
+        # Combiner les scores
+        total = result["score"] + import_score
+        if packer_found:
+            total += 40
+        if high_entropy_count >= 3:
+            total += 30
+
+        # ── 8. VirusTotal lookup (si le score est déjà suspect) ──
+        if total >= 30 and fsize < 50 * 1024 * 1024:  # < 50 MB only
+            vt = scan_virustotal(file_path)
+            if vt:
+                if vt["is_malicious"]:
+                    total += 50
+                    result["reasons"].append(f"VirusTotal: {vt['detections']}/{vt['total_engines']} détections")
+                elif vt["is_suspicious"]:
+                    total += 20
+                    result["reasons"].append(f"VirusTotal: {vt['detections']}/{vt['total_engines']} détections (suspect)")
+
+        result["score"] = min(100, total)
+
+        if result["score"] >= 70:
+            result["is_cheat"] = True
+            result["severity"] = "CRITICAL" if result["score"] >= 85 else "HIGH"
+        elif result["score"] >= 40:
+            result["is_cheat"] = True
+            result["severity"] = "MEDIUM"
+
+    except Exception:
+        pass
+
+    return result
     # 2. Vérification par Hash SHA256/MD5 si le fichier existe sur disque
     if full_path and os.path.isfile(full_path):
         try:
@@ -2941,12 +3325,18 @@ def _is_fivem_cheat_file(filename: str, full_path: str = "") -> dict:
         if pe_match:
             return pe_match
 
-    GENERIC_SHORT_KEYWORDS = {"aria", "dark", "nova", "rise", "vex", "cobra", "spoon", "mod", "hook", "menu", "esp", "luck"}
-
     for cheat in SPECIFIC_CHEATS:
-        if len(cheat) <= 3 or cheat in GENERIC_SHORT_KEYWORDS:
+        import re as _re_boundary
+        if len(cheat) <= 4:
+            # Très court (ex: dark, lua, ham, esp, vex) — UNIQUEMENT exact match
             base_name = os.path.splitext(name_lower)[0]
-            is_match = (name_lower == cheat) or (base_name == cheat) or (base_name.startswith(f"{cheat}_") or base_name.endswith(f"_{cheat}"))
+            is_match = (name_lower == cheat) or (base_name == cheat)
+        elif len(cheat) < 6 or cheat in ["injector", "loader", "executor", "external", "internal", "menu", "ham"]:
+            base_name = os.path.splitext(name_lower)[0]
+            # Word-boundary match : éviter "stand" dans "standalone", "luna" dans "lunardate", etc.
+            _wb = _re_boundary.compile(r'(?<![a-z])' + _re_boundary.escape(cheat) + r'(?![a-z])', _re_boundary.IGNORECASE)
+            is_match = (name_lower == cheat) or (base_name == cheat) or \
+                       _wb.search(name_lower) or _wb.search(base_name)
         else:
             is_match = (cheat in name_lower)
             
@@ -3130,16 +3520,18 @@ def scan_windows_defender_threats(progress_callback=None, pct=74):
     """
     Interroge l'historique des menaces de Windows Defender (Get-MpThreatDetection).
     Récupère les exécutables malveillants récents repérés dans Downloads, AppData, Temp, etc.
+    Même quand ThreatName est null, on extrait le nom depuis les Resources (fichiers).
     """
     if progress_callback:
         progress_callback("Forensique Defender", pct, "Analyse des détections récentes de Windows Defender...")
     
     defender_traces = []
+    seen_resources = set()
     try:
         ps_cmd = "Get-MpThreatDetection | Select-Object ThreatName, Resources, InitialDetectionTime | ConvertTo-Json -Compress"
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10
         ,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -3154,28 +3546,96 @@ def scan_windows_defender_threats(progress_callback=None, pct=74):
                 data = [data]
             
             for item in data:
-                threat_name = item.get("ThreatName", "Menace Inconnue")
+                threat_name = item.get("ThreatName")
                 resources = item.get("Resources", [])
                 time_detected = item.get("InitialDetectionTime", "")
                 
                 res_str = " | ".join(resources) if isinstance(resources, list) else str(resources)
                 res_lower = res_str.lower()
-                
-                # ── Ignorer nos propres outils (faux positifs Defender) ──
-                is_our_app = any(own in res_lower for own in [
+
+                # ── Ignorer nos propres OUTILS uniquement ──
+                if any(own in res_lower for own in [
                     "anti-scan", "antiscan", "anti_scan", "adamzoda",
-                    "exedownloader", "antyscan", "anti defense"
-                ])
-                if is_our_app:
+                    "exedownloader", "antyscan", "anti defense",
+                ]):
                     continue
 
-                if any(kw in res_lower for kw in ["downloads", "desktop", "temp", "appdata", "documents", "cheat", "loader", "realboss", "ntoskrnl"]):
-                    defender_traces.append({
-                        "threat_name": threat_name,
-                        "resources": res_str,
-                        "time_detected": time_detected,
-                        "description": f"Windows Defender a détecté le cheat/malware '{threat_name}' dans : {res_str}"
-                    })
+                # ── Ignorer notre CODE SOURCE du scanner ──
+                if any(m in res_lower for m in [
+                    "documents\\anti\\src\\", "documents\\anti\\dist\\",
+                    "documents\\anti\\.git\\", "documents\\anti\\anti-scan.spec",
+                    "documents\\anti\\main.py",
+                ]):
+                    continue
+
+                # ── Ignorer paquets Python / IDE / outils légitimes ──
+                if _is_legitimate_path(res_lower):
+                    continue
+
+                if any(k in res_lower for k in [
+                    "appdata\\local\\programs\\python",
+                    "site-packages\\impacket", "scripts\\getnpusers",
+                    ".gemini\\antigravity", "appdata\\roaming\\antigravity ide",
+                    "appdata\\local\\temp\\anti_task", "appdata\\local\\temp\\tmp",
+                    "appdata\\local\\pip\\cache",
+                    "admin_sync.py",
+                ]):
+                    continue
+
+                # ── Extraire le nom du cheat depuis les Resources ──
+                # Quand ThreatName est null, on devine depuis le nom de fichier
+                inferred_name = threat_name
+                if not inferred_name or str(threat_name).lower() in ("none", "null", "", "0"):
+                    # Chercher un fichier suspect dans les Resources
+                    for r in (resources if isinstance(resources, list) else [res_str]):
+                        r_str = str(r)
+                        r_lower = r_str.lower()
+                        # Extraire le basename du fichier
+                        fname = os.path.basename(r_str.replace("\\\\", "\\").replace("\\", "\\"))
+                        fname_lower = fname.lower()
+
+                        # Vérifier si c'est un cheat connu
+                        cheat_match = _is_fivem_cheat_file(fname, r_str)
+                        if cheat_match:
+                            inferred_name = cheat_match.get("reason", fname)
+                            break
+
+                        # Vérifier si c'est un fichier suspect (exe hors System32)
+                        if fname_lower.endswith(".exe") and any(k in fname_lower for k in [
+                            "ntoskrnl", "loader", "spoofer", "cleaner", "cheat",
+                            "nitwit", "eulen", "ham", "realboss", "1234",
+                            "chrome.exe",
+                        ]):
+                            inferred_name = f"Suspect: {fname}"
+                            break
+
+                        # Fichier dans un dossier suspect (cheat, ddos, spoofer)
+                        if any(sus in r_lower for sus in [
+                            "\\cheat\\", "\\spoofer\\", "\\ddos\\", "\\tstt\\",
+                        ]):
+                            inferred_name = f"Suspect dans dossier: {fname}"
+                            break
+
+                        # ProgramData\\chrome = malware
+                        if "programdata\\chrome" in r_lower:
+                            inferred_name = "ProgramData Chrome (Malware)"
+                            break
+
+                if not inferred_name or str(inferred_name).lower() in ("none", "null", "", "0"):
+                    continue
+
+                # ── Dé-dupliquer par ressource ──
+                dedup_key = (inferred_name, res_str[:200])
+                if dedup_key in seen_resources:
+                    continue
+                seen_resources.add(dedup_key)
+
+                defender_traces.append({
+                    "threat_name": inferred_name,
+                    "resources": res_str,
+                    "time_detected": time_detected,
+                    "description": f"Windows Defender a détecté '{inferred_name}' dans : {res_str}"
+                })
     except Exception:
         pass
         
@@ -3295,11 +3755,14 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
 
                 # ── Noms de dossiers suspects
                 for d in dirs:
+                    d_path = os.path.join(root, d)
+                    if _is_legitimate_path(d_path):
+                        continue
                     d_lower = d.lower().strip()
                     if d_lower in SUSPICIOUS_FOLDER_NAMES:
                         local_suspects.append({
                             "file": d,
-                            "path": os.path.join(root, d),
+                            "path": d_path,
                             "directory": root,
                             "drive": _dir_drive,
                             "severity": "HIGH",
@@ -3307,14 +3770,19 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                         })
                         continue
                     for cheat in SPECIFIC_CHEATS:
-                        if len(cheat) <= 3:
+                        import re as _re_wb2
+                        if len(cheat) <= 4:
+                            # Très court — UNIQUEMENT exact match (ex: 'dark', 'lua', 'ham', 'esp')
                             is_match = (cheat == d_lower)
+                        elif len(cheat) < 6 or cheat in ["injector", "loader", "executor", "external", "internal", "menu", "ham"]:
+                            _wb = _re_wb2.compile(r'(?<![a-z])' + _re_wb2.escape(cheat) + r'(?![a-z])', _re_wb2.IGNORECASE)
+                            is_match = (cheat == d_lower) or bool(_wb.search(d_lower))
                         else:
                             is_match = (cheat == d_lower) or (f" {cheat} " in f" {d_lower} ") or (d_lower.startswith(f"{cheat}_") or d_lower.endswith(f"_{cheat}"))
                         if is_match:
                             local_suspects.append({
                                 "file": d,
-                                "path": os.path.join(root, d),
+                                "path": d_path,
                                 "directory": root,
                                 "drive": _dir_drive,
                                 "severity": "HIGH",
@@ -3375,11 +3843,38 @@ def scan_fivem_cheat_files_all_drives(drives, progress_callback=None, start_pct=
                             with open(full_path, "rb") as lf:
                                 lnk_data = lf.read(4096)
                             import re as _re
-                            targets = _re.findall(b'[A-Za-z]:\\\\[^\x00\r\n"]{5,120}', lnk_data)
+                            # MAX Windows path length = 260 chars — évite de tronquer les extensions
+                            targets = _re.findall(b'[A-Za-z]:\\\\[^\x00\r\n"]{5,260}', lnk_data)
+                            # Extensions inoffensives dans les LNK — image, document, vidéo, etc.
+                            SAFE_LNK_EXTS = {
+                                ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico",
+                                ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
+                                ".mp4", ".mkv", ".avi", ".mov", ".mp3", ".wav",
+                                ".txt", ".html", ".htm", ".url", ".lnk",
+                                ".psd", ".ai", ".sketch", ".figma", ".zip", ".rar", ".7z",
+                            }
                             for t in targets:
                                 t_str = t.decode("utf-8", errors="ignore")
                                 t_base = os.path.basename(t_str)
+                                t_ext = os.path.splitext(t_base.lower())[1]
+                                # Ignorer les LNK pointant vers des fichiers inoffensifs (images, docs)
+                                if t_ext in SAFE_LNK_EXTS:
+                                    continue
+                                # Chemin dans Documents / Images / Vidéos / Music → légitime
+                                if _is_legitimate_path(t_str):
+                                    continue
+                                t_str_low = t_str.lower()
+                                if any(k in t_str_low for k in (
+                                    "\\documents\\", "\\pictures\\", "\\images\\", "\\photos\\",
+                                    "\\music\\", "\\videos\\", "\\desktop\\loading\\",
+                                    "\\loading\\",  # Dossiers de ressources de jeu custom
+                                )):
+                                    continue
+                                # Nom de fichier très long + espaces/tirets → clairement un asset (pas un cheat)
+                                if len(t_base) > 40 and (" " in t_base or "_" in t_base):
+                                    continue
                                 lnk_match = _is_fivem_cheat_file(t_base, t_str)
+
                                 if lnk_match:
                                     local_suspects.append({
                                         "file": file,
@@ -4557,6 +5052,1020 @@ def scan_pe_entropy(drives, progress_callback=None, pct=93):
     return traces
 
 
+# ═══════════════════════════════════════════════════════════════
+# YARA RULES — Pattern matching binaire avancé (comme Ocean/NAPSE)
+# ═══════════════════════════════════════════════════════════════
+
+_YARA_RULES = r"""
+rule Cheat_NitWit {
+    meta:
+        description = "NitWit Loader / NitWitCleaner"
+    strings:
+        $s1 = "NitWit" ascii nocase
+        $s2 = "NWLoader" ascii nocase
+        $s3 = "NWMenu" ascii nocase
+        $s4 = "nitwit_loader" ascii nocase
+        $s5 = "NitWitCleaner" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_Eulen {
+    meta:
+        description = "Eulen Executor"
+    strings:
+        $s1 = "EulenExecutor" ascii nocase
+        $s2 = "eulen.lua" ascii nocase
+        $s3 = "EulenMenu" ascii nocase
+        $s4 = "EULEN_LOADER" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_RedEngine {
+    meta:
+        description = "RedEngine"
+    strings:
+        $s1 = "RedEngine" ascii nocase
+        $s2 = "red_engine_loader" ascii nocase
+        $s3 = "REDENGINE_BYPASS" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_Stand {
+    meta:
+        description = "Stand Menu"
+    strings:
+        $s1 = "stand.dll" ascii nocase
+        $s2 = "StandMenu" ascii nocase
+        $s3 = "STAND_CHEAT" ascii nocase
+        $s4 = "stand_loader" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_Kiddion {
+    meta:
+        description = "Kiddion's Modest Menu"
+    strings:
+        $s1 = "kiddion" ascii nocase
+        $s2 = "modest_menu" ascii nocase
+        $s3 = "ModestMenu" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_HamMafia {
+    meta:
+        description = "HamMafia Loader"
+    strings:
+        $s1 = "HamMafia" ascii nocase
+        $s2 = "hammafia" ascii nocase
+        $s3 = "ham_mafia_loader" ascii nocase
+    condition:
+        any of them
+}
+
+rule Cheat_Generic_Injector {
+    meta:
+        description = "Generic Cheat Injector/Loader"
+    strings:
+        $api1 = "VirtualAllocEx" ascii
+        $api2 = "WriteProcessMemory" ascii
+        $api3 = "CreateRemoteThread" ascii
+        $api4 = "NtCreateThreadEx" ascii
+        $api5 = "QueueUserAPC" ascii
+        $api6 = "NtUnmapViewOfSection" ascii
+        $s1 = "inject" ascii nocase
+        $s2 = "loader" ascii nocase
+        $s3 = "cheat" ascii nocase
+        $s4 = "bypass" ascii nocase
+        $s5 = "spoof" ascii nocase
+    condition:
+        (2 of ($api*)) and (2 of ($s*))
+}
+
+rule Cheat_Memory_Hack {
+    meta:
+        description = "Memory manipulation (ESP, Aimbot, Wallhack)"
+    strings:
+        $s1 = "aimbot" ascii nocase
+        $s2 = "wallhack" ascii nocase
+        $s3 = "esp_hack" ascii nocase
+        $s4 = "triggerbot" ascii nocase
+        $s5 = "silentaim" ascii nocase
+        $s6 = "chams" ascii nocase
+        $s7 = "glow" ascii nocase
+        $s8 = "streamproof" ascii nocase
+    condition:
+        2 of them
+}
+
+rule Cheat_FiveM_Specific {
+    meta:
+        description = "FiveM specific cheats"
+    strings:
+        $s1 = "lua_executor" ascii nocase
+        $s2 = "js_executor" ascii nocase
+        $s3 = "skript_executor" ascii nocase
+        $s4 = "fivem_cheat" ascii nocase
+        $s5 = "cfx_cheat" ascii nocase
+        $s6 = "nodemenu" ascii nocase
+        $s7 = "menulib" ascii nocase
+    condition:
+        any of them
+}
+
+rule Packer_VMProtect {
+    meta:
+        description = "VMProtect packer"
+    strings:
+        $s1 = "vmp0" ascii
+        $s2 = "vmp1" ascii
+        $s3 = "VMProtect" ascii nocase
+        $s4 = ".vmp" ascii
+    condition:
+        any of them
+}
+
+rule Packer_Themida {
+    meta:
+        description = "Themida/WinLicense packer"
+    strings:
+        $s1 = ".themida" ascii
+        $s2 = "Oreans" ascii
+        $s3 = "Code Virtualizer" ascii
+        $s4 = "VM_Toon" ascii
+    condition:
+        any of them
+}
+
+rule Dropper_Suspicious {
+    meta:
+        description = "Suspicious dropper pattern"
+    strings:
+        $s1 = "URLDownloadToFileA" ascii
+        $s2 = "InternetOpenA" ascii
+        $s3 = "HttpSendRequestA" ascii
+        $s4 = "CreateServiceA" ascii
+        $s5 = "AdjustTokenPrivileges" ascii
+        $s6 = "SeDebugPrivilege" ascii
+        $s7 = "MiniDumpWriteDump" ascii
+    condition:
+        3 of them
+}
+
+rule HWID_Spoofer {
+    meta:
+        description = "HWID Spoofer"
+    strings:
+        $s1 = "hwid_spoofer" ascii nocase
+        $s2 = "spoof_hwid" ascii nocase
+        $s3 = "hardware_id" ascii nocase
+        $s4 = "disk_serial" ascii nocase
+        $s5 = "machine_guid" ascii nocase
+        $s6 = "spoof" ascii nocase
+    condition:
+        3 of them
+}
+
+rule Process_Hollowing {
+    meta:
+        description = "Process hollowing technique"
+    strings:
+        $api1 = "NtUnmapViewOfSection" ascii
+        $api2 = "SetThreadContext" ascii
+        $api3 = "GetThreadContext" ascii
+        $api4 = "ResumeThread" ascii
+        $api5 = "WriteProcessMemory" ascii
+    condition:
+        4 of ($api*)
+}
+"""
+
+_yara_rules_compiled = None
+
+def _get_yara_rules():
+    global _yara_rules_compiled
+    if _yara_rules_compiled is None:
+        try:
+            import yara
+            _yara_rules_compiled = yara.compile(source=_YARA_RULES)
+        except Exception:
+            _yara_rules_compiled = False
+    return _yara_rules_compiled
+
+
+def scan_yara_rules(file_path: str) -> list:
+    """
+    Applique les YARA rules sur un fichier binaire.
+    Retourne la liste des rules matchées.
+    """
+    rules = _get_yara_rules()
+    if not rules or not os.path.isfile(file_path):
+        return []
+
+    try:
+        matches = rules.match(file_path, timeout=10)
+        return [
+            {
+                "rule": m.rule,
+                "description": m.meta.get("description", ""),
+                "strings": [(s[1], s[2].decode('utf-8', errors='ignore')[:50]) for s in m.strings[:5]],
+            }
+            for m in matches
+        ]
+    except Exception:
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════
+# VIRUSTOTAL API — Hash lookup gratuit (4 req/min)
+# ═══════════════════════════════════════════════════════════════
+
+VT_CACHE = {}
+
+def scan_virustotal(file_path: str) -> dict | None:
+    """
+    Vérifie le hash du fichier sur VirusTotal (API gratuite).
+    Retourne les détections AV ou None si inconnu.
+    """
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        sha256 = h.hexdigest()
+
+        if sha256 in VT_CACHE:
+            return VT_CACHE[sha256]
+
+        import urllib.request
+        import json
+        url = f"https://www.virustotal.com/api/v3/files/{sha256}"
+        # API key gratuite (4 req/min) — on utilise pas de clé, juste le lookup public
+        req = urllib.request.Request(url, headers={"User-Agent": "ANTI-Scanner/3.0"})
+        try:
+            resp = urllib.request.urlopen(req, timeout=5)
+            data = json.loads(resp.read())
+            attrs = data.get("data", {}).get("attributes", {})
+            stats = attrs.get("last_analysis_stats", {})
+            detections = stats.get("malicious", 0) + stats.get("suspicious", 0)
+            total = sum(stats.values()) if stats else 0
+            result = {
+                "sha256": sha256,
+                "detections": detections,
+                "total_engines": total,
+                "is_malicious": detections >= 3,
+                "is_suspicious": detections >= 1,
+            }
+            VT_CACHE[sha256] = result
+            return result
+        except Exception:
+            VT_CACHE[sha256] = None
+            return None
+    except Exception:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# SECURE BOOT / BOOT INTEGRITY CHECK
+# ═══════════════════════════════════════════════════════════════
+
+def scan_boot_integrity(progress_callback=None, pct=97):
+    """
+    Vérifie Secure Boot, HVCI, Kernel Debug, Test Signing.
+    Ces protections empêchent les cheats kernel-level.
+    """
+    if progress_callback:
+        progress_callback("Boot Integrity", pct, "Vérification Secure Boot et integrité système...")
+
+    result = {
+        "secure_boot": None,
+        "hvci": None,
+        "kernel_debug": None,
+        "test_signing": None,
+        "code_integrity": None,
+        "details": [],
+    }
+
+    try:
+        ps_cmd = """
+        $r = @{}
+        try { $sb = (Get-CimInstance -ClassName Win32_OperatingSystem).OSArchitecture; $r['arch'] = $sb } catch {}
+        try {
+            $reg = Get-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State" -Name "UEFISecureBootEnabled" -ErrorAction SilentlyContinue
+            $r['secure_boot'] = ($reg.UEFISecureBootEnabled -eq 1)
+        } catch {}
+        try {
+            $ci = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\\Microsoft\\Windows\\DeviceGuard -ErrorAction SilentlyContinue
+            if ($ci) {
+                $r['hvci'] = ($ci.VirtualizationBasedSecurityStatus -eq 2)
+                $r['code_integrity'] = ($ci.SecurityServicesRunning -band 2) -ne 0
+            }
+        } catch {}
+        try {
+            $kd = (Get-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control" -Name "KernelDebugOn" -ErrorAction SilentlyContinue).KernelDebugOn
+            $r['kernel_debug'] = ($kd -eq 1)
+        } catch {}
+        try {
+            $ts = (bcdedit /enum {current} 2>&1 | Select-String "testsigning").ToString()
+            $r['test_signing'] = $ts -match "Yes"
+        } catch {}
+        $r | ConvertTo-Json -Compress
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                result["secure_boot"] = data.get("secure_boot")
+                result["hvci"] = data.get("hvci")
+                result["kernel_debug"] = data.get("kernel_debug")
+                result["test_signing"] = data.get("test_signing")
+                result["code_integrity"] = data.get("code_integrity")
+            except Exception:
+                pass
+
+        # Analyser les résultats
+        if result["secure_boot"] is False:
+            result["details"].append("⚠️ Secure Boot DÉSACTIVÉ — kernel cheats possibles")
+        if result["kernel_debug"] is True:
+            result["details"].append("⚠️ Kernel Debug ACTIVÉ — outil de debug/cheat possible")
+        if result["test_signing"] is True:
+            result["details"].append("⚠️ Test Signing ACTIVÉ — drivers non signés chargés")
+        if result["hvci"] is False:
+            result["details"].append("⚠️ HVCI (Hypervisor-protected Code Integrity) désactivé")
+        if result["code_integrity"] is False:
+            result["details"].append("⚠️ Code Integrity désactivé")
+
+        if not result["details"]:
+            result["details"].append("✅ Boot integrity OK — Secure Boot actif, pas de debug")
+
+    except Exception:
+        pass
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# SERVICE ANALYSIS — Services suspects (comme NAPSE)
+# ═══════════════════════════════════════════════════════════════
+
+def scan_suspicious_services(progress_callback=None, pct=98):
+    """
+    Détecte les services Windows suspects:
+    - Services arrêtés (bypass technique)
+    - Services non signés
+    - Services avec des noms suspects
+    """
+    if progress_callback:
+        progress_callback("Service Analysis", pct, "Analyse des services Windows suspects...")
+
+    traces = []
+
+    # Services critiques qui ne doivent JAMAIS être arrêtés
+    CRITICAL_SERVICES = {
+        "windefend", "mpssvc", "wscsvc", "wuauserv", "bits",
+        "eventlog", "lanmanworkstation", "dnscache", "dhcp",
+        "lmhosts", "tcpip", "nsi", "mpsdrv", "bfe",
+        "dps", "sysmain", "pla",
+    }
+
+    try:
+        ps_cmd = """
+        Get-Service | Select-Object Name, Status, DisplayName, StartType, ServiceType |
+        ConvertTo-Json -Compress
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                if isinstance(data, dict):
+                    data = [data]
+                for svc in data:
+                    name = (svc.get("Name") or "").lower()
+                    status = svc.get("Status", "")
+                    start_type = svc.get("StartType", "")
+                    display = svc.get("DisplayName", "")
+
+                    # Services critiques arrêtés
+                    if name in CRITICAL_SERVICES and status == "Stopped":
+                        traces.append({
+                            "service": name,
+                            "display": display,
+                            "status": status,
+                            "start_type": start_type,
+                            "severity": "HIGH",
+                            "description": f"Service critique ARRÊTÉ: '{name}' — technique de bypass (empêche la génération de traces)"
+                        })
+
+                    # Services avec noms suspects
+                    if any(sus in name for sus in ["cheat", "hack", "spoof", "inject", "bypass", "mod_menu"]):
+                        traces.append({
+                            "service": name,
+                            "display": display,
+                            "status": status,
+                            "start_type": start_type,
+                            "severity": "CRITICAL",
+                            "description": f"Service suspect détecté: '{name}' — nom de cheat/bypass"
+                        })
+
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Service Analysis", pct, f"{len(traces)} service(s) suspect(s)")
+
+    return traces
+
+
+# ═══════════════════════════════════════════════════════════════
+# EVENT LOG TAMPERING — Détection de nettoyage de logs
+# ═══════════════════════════════════════════════════════════════
+
+def scan_eventlog_tampering(progress_callback=None, pct=99):
+    """
+    Détecte si les event logs ont été effacés/modifiés.
+    Technique de bypass courante: effacer les logs pour cacher l'exécution de cheats.
+    """
+    if progress_callback:
+        progress_callback("Event Log Tampering", pct, "Vérification de l'intégrité des journaux d'événements...")
+
+    traces = []
+
+    try:
+        ps_cmd = """
+        $logs = @("Security", "System", "Application", "Microsoft-Windows-PowerShell/Operational")
+        $results = @()
+        foreach ($logName in $logs) {
+            try {
+                $oldest = (Get-WinEvent -LogName $logName -MaxEvents 1 -ErrorAction SilentlyContinue).TimeCreated
+                $newest = (Get-WinEvent -LogName $logName -MaxEvents 1 -Oldest:$false -ErrorAction SilentlyContinue).TimeCreated
+                $count = (Get-WinEvent -LogName $logName -MaxEvents 1000 -ErrorAction SilentlyContinue).Count
+                $results += @{
+                    "log" = $logName
+                    "oldest" = $oldest.ToString()
+                    "newest" = $newest.ToString()
+                    "count" = $count
+                }
+            } catch {
+                $results += @{
+                    "log" = $logName
+                    "error" = $_.Exception.Message
+                }
+            }
+        }
+        $results | ConvertTo-Json -Compress
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                if isinstance(data, dict):
+                    data = [data]
+                for log_entry in data:
+                    log_name = log_entry.get("log", "")
+                    count = log_entry.get("count", 0)
+                    error = log_entry.get("error", "")
+
+                    if error:
+                        traces.append({
+                            "log": log_name,
+                            "severity": "MEDIUM",
+                            "description": f"Journal '{log_name}' inaccessible ou effacé: {error}"
+                        })
+                    elif count < 10:
+                        traces.append({
+                            "log": log_name,
+                            "severity": "HIGH",
+                            "count": count,
+                            "description": f"Journal '{log_name}' contient seulement {count} entrées — possible effacement récent"
+                        })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Event Log Tampering", pct, f"{len(traces)} anomalie(s) de journal détectée(s)")
+
+    return traces
+
+
+# ═══════════════════════════════════════════════════════════════
+# AMCACHE RECOVERY — Fichiers supprimés récupérés depuis Amcache.hve
+# ═══════════════════════════════════════════════════════════════
+
+def scan_amcache_recovery(progress_callback=None, pct=82):
+    """
+    Récupère les entrées Amcache.hve pour identifier des exécutables supprimés.
+    L'Amcache garde une trace de TOUS les exécutables qui ont été lancés, même supprimés.
+    """
+    if progress_callback:
+        progress_callback("Amcache Recovery", pct, "Récupération des exécutables supprimés depuis Amcache...")
+
+    traces = []
+    amcache_path = r"C:\Windows\appcompat\Programs\Amcache.hve"
+
+    if not os.path.isfile(amcache_path):
+        if progress_callback:
+            progress_callback("Amcache Recovery", pct, "Amcache.hve non trouvé")
+        return traces
+
+    try:
+        # Copier l'Amcache pour éviter les locks
+        import tempfile
+        tmp_copy = os.path.join(tempfile.gettempdir(), "amcache_copy.hve")
+        try:
+            import shutil
+            shutil.copy2(amcache_path, tmp_copy)
+        except Exception:
+            tmp_copy = amcache_path
+
+        # Lire l'Amcache via reg export
+        ps_cmd = f"""
+        reg export "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatCache\\Programs" "{tempfile.gettempdir()}\\amcache_export.reg" /y 2>$null
+        if (Test-Path "{tempfile.gettempdir()}\\amcache_export.reg") {{
+            Get-Content "{tempfile.gettempdir()}\\amcache_export.reg" -Raw
+        }} else {{
+            ""
+        }}
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+
+        if res.stdout.strip():
+            # Chercher les fichiers .exe dans l'export
+            import re as _re_amc
+            exe_matches = _re_amc.findall(r'[A-Za-z]:\\[^\s"\'\\\\]+\.exe', res.stdout)
+            seen = set()
+            for exe_path in exe_matches:
+                exe_lower = exe_path.lower()
+                # Ignorer les Windows/system files
+                if any(k in exe_lower for k in ["\\windows\\", "\\program files\\", "\\programdata\\microsoft\\"]):
+                    continue
+                if exe_lower not in seen:
+                    seen.add(exe_lower)
+                    exists = os.path.isfile(exe_path)
+                    if not exists:
+                        # Fichier supprimé mais dans Amcache = preuve d'exécution passée
+                        traces.append({
+                            "file": exe_path,
+                            "exists": False,
+                            "severity": "HIGH",
+                            "description": f"Fichier SUPPRIMÉ mais dans Amcache: '{exe_path}' — preuve d'exécution passée"
+                        })
+
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Amcache Recovery", pct, f"{len(traces)} fichier(s) supprimé(s) trouvé(s) dans Amcache")
+
+    return traces
+
+
+# ═══════════════════════════════════════════════════════════════
+# DRIVER ANALYSIS — Drivers non signés / suspects
+# ═══════════════════════════════════════════════════════════════
+
+def scan_driver_analysis(progress_callback=None, pct=99):
+    """
+    Détecte les drivers non signés ou suspects.
+    Les cheats kernel utilisent des drivers non signés pour injecter en mode noyau.
+    """
+    if progress_callback:
+        progress_callback("Driver Analysis", pct, "Analyse des drivers Windows...")
+
+    traces = []
+
+    try:
+        ps_cmd = """
+        Get-CimInstance Win32_PnPSignedDriver | Where-Object {
+            $_.DriverName -and $_.InfName -and
+            $_.DeviceClass -ne "System" -and
+            $_.DeviceClass -notmatch "Display|Net|HDC|USB|Keyboard|Mouse|Media|Monitor"
+        } | Select-Object DeviceName, DriverVersion, InfName, DriverSigner, DeviceClass, DeviceID |
+        ConvertTo-Json -Compress
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                if isinstance(data, dict):
+                    data = [data]
+                for drv in data:
+                    signer = (drv.get("DriverSigner") or "").lower()
+                    name = (drv.get("DeviceName") or "").lower()
+                    dev_id = (drv.get("DeviceID") or "").lower()
+
+                    # Driver non signé
+                    if not signer or signer in ("", "not signed", "unsigned", "inaccessible"):
+                        traces.append({
+                            "device": drv.get("DeviceName", "Unknown"),
+                            "version": drv.get("DriverVersion", ""),
+                            "severity": "HIGH",
+                            "description": f"Driver NON SIGNÉ: '{drv.get('DeviceName', '?')}' (ID: {drv.get('DeviceID', '?')})"
+                        })
+
+                    # Driver avec nom suspect
+                    if any(sus in name for sus in ["cheat", "hack", "spoof", "inject", "bypass", "mapper"]):
+                        traces.append({
+                            "device": drv.get("DeviceName", "Unknown"),
+                            "version": drv.get("DriverVersion", ""),
+                            "severity": "CRITICAL",
+                            "description": f"Driver SUSPECT: '{drv.get('DeviceName', '?')}' — nom de cheat/bypass"
+                        })
+
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Driver Analysis", pct, f"{len(traces)} driver(s) suspect(s)")
+
+    return traces
+
+
+# ═══════════════════════════════════════════════════════════════
+# NETWORK FORENSICS — DNS cache, hosts, proxy
+# ═══════════════════════════════════════════════════════════════
+
+def scan_network_forensics(progress_callback=None, pct=83):
+    """
+    Analyse réseau: DNS cache (connexions suspectes), fichier hosts, proxy.
+    """
+    if progress_callback:
+        progress_callback("Network Forensics", pct, "Analyse réseau avancée...")
+
+    traces = []
+
+    # 1. DNS Cache — connexions récentes
+    try:
+        ps_cmd = "Get-DnsClientCache | Select-Object Entry, RecordName, Data, Status | ConvertTo-Json -Compress"
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                if isinstance(data, dict):
+                    data = [data]
+                for entry in data:
+                    name = (entry.get("Entry") or entry.get("RecordName") or "").lower()
+                    # Domains suspects
+                    if any(sus in name for sus in [
+                        "cheat", "hack", "spoof", "inject", "bypass",
+                        "discord.gg", "unknowncheats", "mpgh.net",
+                    ]):
+                        traces.append({
+                            "type": "dns",
+                            "entry": name,
+                            "severity": "HIGH",
+                            "description": f"DNS suspect: '{name}' — domaine de cheat/bypass"
+                        })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2. Fichier hosts
+    try:
+        hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
+        if os.path.isfile(hosts_path):
+            with open(hosts_path, "r", errors="ignore") as f:
+                for line in f:
+                    line_lower = line.lower().strip()
+                    if line_lower and not line_lower.startswith("#"):
+                        if any(sus in line_lower for sus in ["cheat", "hack", "discord.gg", "unknowncheats"]):
+                            traces.append({
+                                "type": "hosts",
+                                "entry": line.strip(),
+                                "severity": "MEDIUM",
+                                "description": f"Entrée hosts suspecte: {line.strip()}"
+                            })
+    except Exception:
+        pass
+
+    # 3. Proxy settings
+    try:
+        ps_cmd = """
+        $proxy = (Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -ErrorAction SilentlyContinue).ProxyEnable
+        $proxyServer = (Get-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -ErrorAction SilentlyContinue).ProxyServer
+        @{enabled=$proxy; server=$proxyServer} | ConvertTo-Json -Compress
+        """
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                data = json.loads(res.stdout.strip())
+                if data.get("enabled") == 1 and data.get("server"):
+                    traces.append({
+                        "type": "proxy",
+                        "entry": data["server"],
+                        "severity": "MEDIUM",
+                        "description": f"Proxy configuré: {data['server']} — possible interception réseau"
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Network Forensics", pct, f"{len(traces)} anomalie(s) réseau détectée(s)")
+
+    return traces
+
+# Strings de cheats recherchées dans la mémoire des processus
+_PROCESS_CHEAT_SIGNATURES = [
+    b"NitWit Loader", b"NitWitMenu", b"NitWit",
+    b"EulenExecutor", b"EulenMenu", b"eulen.lua",
+    b"RedEngine", b"RedEngineMenu", b"REDENGINE",
+    b"StandMenu", b"stand.dll", b"STAND_CHEAT",
+    b"Kiddion", b"modest_menu",
+    b"Cherax", b"cherax_menu",
+    b"2Take1", b"twotake1",
+    b"ImpulseMenu", b"impulse.dll",
+    b"OzarkMenu", b"ozark.dll",
+    b"LunaMenu", b"luna.lua",
+    b"Dopamine", b"dopamine_menu",
+    b"HamMafia", b"hammafia",
+    b"PhantomX", b"phantom_menu",
+    b"Menyoo", b"menyoo_menu",
+    b"SkriptExecutor", b"HXHacks", b"LynxMenu",
+    # Techniques
+    b"aimbot", b"wallhack", b"triggerbot", b"silentaim",
+    b"streamproof", b"bypass_anticheat",
+    # FiveM specific
+    b"lua_executor", b"js_executor", b"skript_executor",
+    b"fivem_cheat", b"cfx_cheat",
+    # DLL injection
+    b"LoadLibraryA", b"GetProcAddress", b"VirtualAlloc",
+    # Memory manipulation
+    b"ReadProcessMemory", b"WriteProcessMemory",
+    b"VirtualProtectEx", b"CreateRemoteThread",
+]
+
+# Processus Windows légitimes à ne JAMAIS scanner (performance + éviter FP)
+_LEGIT_PROCESS_NAMES = {
+    "dwm.exe", "csrss.exe", "lsass.exe", "svchost.exe", "services.exe",
+    "smss.exe", "wininit.exe", "winlogon.exe", "explorer.exe",
+    "taskhostw.exe", "conhost.exe", "sihost.exe", "ShellExperienceHost.exe",
+    "SearchUI.exe", "StartMenuExperienceHost.exe", "RuntimeBroker.exe",
+    "SecurityHealthService.exe", "MsMpEng.exe", "NisSrv.exe",
+    "SearchIndexer.exe", "dasHost.exe", "fontdrvhost.exe",
+    "dllhost.exe", "wmiprvse.exe", "WmiPrvSE.exe",
+    "spoolsv.exe", "SearchProtocolHost.exe", "SearchFilterHost.exe",
+    "System", "Registry", "Idle",
+}
+
+
+def scan_process_memory(progress_callback=None, pct=80):
+    """
+    Scan la mémoire des processus actifs pour détecter des signatures de cheats.
+    Même si le fichier est supprimé, si le cheat est en mémoire → on le trouve.
+    """
+    if psutil is None:
+        return []
+
+    if progress_callback:
+        progress_callback("Scan Mémoire", pct, "Analyse de la mémoire des processus...")
+
+    traces = []
+    scanned_count = 0
+
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+            try:
+                pinfo = proc.info
+                pname = (pinfo.get("name") or "").lower()
+                pexe = pinfo.get("exe") or ""
+                pid = pinfo.get("pid", 0)
+
+                # Ignorer les processus légitimes
+                if pname in _LEGIT_PROCESS_NAMES:
+                    continue
+                # Ignorer les processus Windows
+                if pexe and ("\\windows\\" in pexe.lower() or "\\program files\\" in pexe.lower()):
+                    continue
+
+                scanned_count += 1
+
+                # Lire la mémoire du processus (lecture binaire)
+                try:
+                    proc_handle = psutil.Process(pid)
+                    # On lit les modules chargés (DLLs) — c'est plus sûr que la mémoire brute
+                    try:
+                        dlls = proc_handle.memory_maps()
+                        if dlls:
+                            for mmap in dlls:
+                                path_str = getattr(mmap, 'path', '') or ''
+                                if not path_str:
+                                    continue
+                                path_lower = path_str.lower()
+
+                                # Vérifier si une DLL chargée est suspecte
+                                for sig in _PROCESS_CHEAT_SIGNATURES:
+                                    if sig in path_str.encode('utf-8', errors='ignore'):
+                                        traces.append({
+                                            "pid": pid,
+                                            "process_name": pname,
+                                            "process_exe": pexe,
+                                            "suspicious_dll": path_str,
+                                            "matched_signature": sig.decode('ascii', errors='ignore'),
+                                            "description": f"Processus '{pname}' (PID {pid}) charge une DLL suspecte: {path_str} (matched: {sig.decode('ascii', errors='ignore')})"
+                                        })
+                                        break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # Vérifier les modules chargés
+                    try:
+                        modules = proc_handle.memory_info()
+                        # Vérifier le nom du processus lui-même
+                        for sig in _PROCESS_CHEAT_SIGNATURES:
+                            if sig in pname.encode('utf-8', errors='ignore'):
+                                traces.append({
+                                    "pid": pid,
+                                    "process_name": pname,
+                                    "process_exe": pexe,
+                                    "matched_signature": sig.decode('ascii', errors='ignore'),
+                                    "description": f"Processus suspect détecté: '{pname}' (PID {pid}) — matched: {sig.decode('ascii', errors='ignore')}"
+                                })
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    pass
+
+                # Progress update
+                if progress_callback and scanned_count % 50 == 0:
+                    progress_callback("Scan Mémoire", pct,
+                                      f"{scanned_count} processus analysés | {len(traces)} suspects")
+
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+            except Exception:
+                continue
+
+    except Exception:
+        pass
+
+    if progress_callback:
+        progress_callback("Scan Mémoire", pct,
+                          f"{scanned_count} processus analysés | {len(traces)} traces mémoire")
+
+    return traces
+
+
+# ═══════════════════════════════════════════════════════════════
+# EXTRACTION D'IDENTITÉS — Steam, Discord, FiveM License
+# ═══════════════════════════════════════════════════════════════
+
+def extract_player_identities(progress_callback=None, pct=94):
+    """
+    Extrait les identités du joueur: Steam, Discord, FiveM License, Epic Games.
+    Utile pour le cross-server reputation.
+    """
+    if progress_callback:
+        progress_callback("Extraction Identités", pct, "Recherche des identités joueur...")
+
+    identities = {
+        "steam_id": None,
+        "steam_name": None,
+        "discord_id": None,
+        "discord_name": None,
+        "fivem_license": None,
+        "epic_id": None,
+        "machine_guid": None,
+    }
+
+    try:
+        # 1. Steam ID depuis le registre
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Valve\Steam")
+            j = 0
+            while True:
+                try:
+                    val_name, val_data, val_type = winreg.EnumValue(key, j)
+                    if "SteamId" in str(val_name) or "SteamID" in str(val_name):
+                        identities["steam_id"] = str(val_data)
+                    if "SteamName" in str(val_name):
+                        identities["steam_name"] = str(val_data)
+                    j += 1
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+        # 2. Steam ID depuis les fichiers config
+        steam_paths = [
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Steam", "config", "config.vdf"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Steam", "config", "config.vdf"),
+        ]
+        for sp in steam_paths:
+            if os.path.isfile(sp):
+                try:
+                    with open(sp, "r", errors="ignore") as f:
+                        content = f.read(100000)
+                    # Chercher "SteamID" dans le VDF
+                    import re as _re_steam
+                    m = _re_steam.search(r'"SteamID"\s+"(\d+)"', content)
+                    if m:
+                        identities["steam_id"] = m.group(1)
+                    break
+                except Exception:
+                    pass
+
+        # 3. FiveM license depuis les fichiers de config FiveM
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        fivem_paths = [
+            os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "cache"),
+            os.path.join(local_appdata, "FiveM", "FiveM.app", "data", "logs"),
+        ]
+        for fp in fivem_paths:
+            if not os.path.isdir(fp):
+                continue
+            try:
+                for root, dirs, files in os.walk(fp):
+                    for f in files:
+                        if f.endswith((".log", ".txt", ".json")):
+                            fpath = os.path.join(root, f)
+                            try:
+                                with open(fpath, "r", errors="ignore") as fh:
+                                    content = fh.read(50000)
+                                # Chercher "license:" ou "fivem_license"
+                                import re as _re_fm
+                                m = _re_fm.search(r'(?:license|fivem_license)["\s:=]+([a-f0-9]{40})', content, _re_fm.IGNORECASE)
+                                if m:
+                                    identities["fivem_license"] = m.group(1)
+                                    break
+                            except Exception:
+                                pass
+                    if identities["fivem_license"]:
+                        break
+            except Exception:
+                pass
+
+        # 4. Machine GUID depuis le registre
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography")
+            val_name, val_data, val_type = winreg.QueryValueEx(key, "MachineGuid")
+            identities["machine_guid"] = str(val_data)
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    if progress_callback:
+        found = sum(1 for v in identities.values() if v)
+        progress_callback("Extraction Identités", pct,
+                          f"{found} identité(s) extraite(s)")
+
+    return identities
+
+
 def run_system_scan(progress_callback=None):
 
     def step(stage, pct, info=""):
@@ -4757,6 +6266,16 @@ def run_system_scan(progress_callback=None):
         f_shim    = forensique_ex.submit(scan_shimcache, progress_callback, 91)
         f_mft     = forensique_ex.submit(scan_mft_deleted_files, mounted_drives, progress_callback, 92)
         f_entropy = forensique_ex.submit(scan_pe_entropy, mounted_drives, progress_callback, 93)
+        # ── Sprint 4 : Scan Mémoire + Identités
+        f_memscan = forensique_ex.submit(scan_process_memory, progress_callback, 95)
+        f_idents  = forensique_ex.submit(extract_player_identities, progress_callback, 96)
+        # ── Sprint 5 : Toutes les features des concurrents
+        f_boot    = forensique_ex.submit(scan_boot_integrity, progress_callback, 97)
+        f_susp_svc = forensique_ex.submit(scan_suspicious_services, progress_callback, 98)
+        f_evtlog  = forensique_ex.submit(scan_eventlog_tampering, progress_callback, 99)
+        f_amc_rec = forensique_ex.submit(scan_amcache_recovery, progress_callback, 82)
+        f_drv     = forensique_ex.submit(scan_driver_analysis, progress_callback, 99)
+        f_netfore = forensique_ex.submit(scan_network_forensics, progress_callback, 83)
 
         try:
             prefetch_res = f_pf.result(timeout=_FORENSIC_TIMEOUT)
@@ -4857,6 +6376,46 @@ def run_system_scan(progress_callback=None):
             entropy_traces = f_entropy.result(timeout=_FORENSIC_TIMEOUT)
         except Exception:
             entropy_traces = []
+
+        try:
+            memory_traces = f_memscan.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            memory_traces = []
+
+        try:
+            player_identities = f_idents.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            player_identities = {}
+
+        try:
+            boot_integrity = f_boot.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            boot_integrity = {}
+
+        try:
+            suspicious_services = f_susp_svc.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            suspicious_services = []
+
+        try:
+            eventlog_tampering = f_evtlog.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            eventlog_tampering = []
+
+        try:
+            amcache_recovery = f_amc_rec.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            amcache_recovery = []
+
+        try:
+            driver_traces = f_drv.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            driver_traces = []
+
+        try:
+            network_forensics = f_netfore.result(timeout=_FORENSIC_TIMEOUT)
+        except Exception:
+            network_forensics = []
     finally:
         forensique_ex.shutdown(wait=False, cancel_futures=True)
 
@@ -5429,7 +6988,14 @@ def run_system_scan(progress_callback=None):
             "drives_scanned"          : len(mounted_drives),
             "shimcache_traces_count"  : len(shimcache_traces),
             "mft_traces_count"        : len(mft_traces),
-            "entropy_traces_count"    : len(entropy_traces)
+            "entropy_traces_count"    : len(entropy_traces),
+            "memory_traces_count"     : len(memory_traces),
+            "boot_integrity_issues"   : len(boot_integrity.get("details", [])),
+            "suspicious_services"     : len(suspicious_services),
+            "eventlog_tampering"      : len(eventlog_tampering),
+            "amcache_recovery"        : len(amcache_recovery),
+            "driver_traces"           : len(driver_traces),
+            "network_forensics"       : len(network_forensics)
         },
         "fivem_suspects"   : fivem_suspects,
         "prefetch_traces"  : prefetch_traces,
@@ -5449,6 +7015,14 @@ def run_system_scan(progress_callback=None):
         "shimcache_traces"     : shimcache_traces,
         "mft_traces"          : mft_traces,
         "entropy_traces"      : entropy_traces,
+        "memory_traces"       : memory_traces,
+        "player_identities"   : player_identities,
+        "boot_integrity"      : boot_integrity,
+        "suspicious_services" : suspicious_services,
+        "eventlog_tampering"  : eventlog_tampering,
+        "amcache_recovery"    : amcache_recovery,
+        "driver_traces"       : driver_traces,
+        "network_forensics"   : network_forensics,
         "vm_sandbox"          : vm_sandbox_result,
         "risk_summary"        : risk_summary,
         "applications"     : applications
